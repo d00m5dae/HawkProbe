@@ -123,8 +123,13 @@ func parseFlags() (options, error) {
 	fs := flag.NewFlagSet("hawkprobe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var profileAlias string
+	var nmapAlias string
+	var secListsAlias string
+	var stdinAlias bool
 
-	fs.StringVar(&opts.ListFile, "list", "", "target file, stdin (-), Nmap XML/gnmap, or httpx JSONL")
+	fs.StringVar(&opts.ListFile, "list", "", "target file, stdin (-), Nmap output, or httpx JSONL")
+	fs.StringVar(&nmapAlias, "nmap", "", "alias for -list with Nmap output")
+	fs.BoolVar(&stdinAlias, "stdin", false, "alias for -list -")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
 	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
@@ -156,6 +161,7 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.Evidence, "evidence", false, "show evidence and remediation")
 	fs.BoolVar(&opts.Discover, "discover", false, "parse robots/sitemap and probe discovered paths")
 	fs.StringVar(&opts.Wordlist, "wordlist", "", "wordlist path or SecLists preset such as @common")
+	fs.StringVar(&secListsAlias, "seclists", "", "SecLists preset alias, e.g. common or dirs-medium")
 	fs.StringVar(&opts.Extensions, "ext", "", "comma-separated extensions for wordlist entries")
 	fs.BoolVar(&opts.NoProgress, "no-progress", false, "disable terminal progress bar")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "disable ANSI colors")
@@ -167,6 +173,29 @@ func parseFlags() (options, error) {
 	if profileAlias != "" {
 		opts.Mode = profileAlias
 	}
+	if nmapAlias != "" {
+		if opts.ListFile != "" {
+			return opts, errors.New("use either -list or -nmap, not both")
+		}
+		opts.ListFile = nmapAlias
+	}
+	if stdinAlias {
+		if opts.ListFile != "" {
+			return opts, errors.New("use either -list/-nmap or -stdin, not both")
+		}
+		opts.ListFile = "-"
+	}
+	if secListsAlias != "" {
+		if opts.Wordlist != "" {
+			return opts, errors.New("use either -wordlist or -seclists, not both")
+		}
+		spec := strings.TrimSpace(secListsAlias)
+		if !strings.HasPrefix(spec, "@") && !strings.HasPrefix(strings.ToLower(spec), "seclists:") && !strings.ContainsAny(spec, "/\\") {
+			spec = "@" + spec
+		}
+		opts.Wordlist = spec
+	}
+
 	if fs.NArg() > 1 {
 		return opts, errors.New("only one positional target is allowed; use -list for more")
 	}
@@ -174,10 +203,10 @@ func parseFlags() (options, error) {
 		opts.Target = fs.Arg(0)
 	}
 	if opts.Target == "" && opts.ListFile == "" {
-		return opts, errors.New("one target or -list input is required")
+		return opts, errors.New("one target or -list/-nmap/-stdin input is required")
 	}
 	if opts.Target != "" && opts.ListFile != "" {
-		return opts, errors.New("use either a target or -list, not both")
+		return opts, errors.New("use either a target or list input, not both")
 	}
 	if opts.Concurrency < 1 || opts.Concurrency > 512 {
 		return opts, errors.New("concurrency must be between 1 and 512")
@@ -227,12 +256,12 @@ func parseFlags() (options, error) {
 
 func reorderArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-list": true, "-rules": true, "-mode": true, "-profile": true,
+		"-list": true, "-nmap": true, "-rules": true, "-mode": true, "-profile": true,
 		"-category": true, "-tag": true, "-severity": true, "-fail-on": true,
 		"-c": true, "-target-c": true, "-rate": true, "-timeout": true,
 		"-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true,
 		"-token": true, "-proxy": true, "-max-redirects": true, "-ua": true,
-		"-host": true, "-wordlist": true, "-ext": true,
+		"-host": true, "-wordlist": true, "-seclists": true, "-ext": true,
 	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
@@ -290,8 +319,8 @@ usage:
   hawkprobe [options] <url>
   hawkprobe <url> [options]
   hawkprobe -list targets.txt [options]
-  hawkprobe -list nmap.xml -mode htb
-  nmap ... -oG - | hawkprobe -list - -mode htb
+  hawkprobe -nmap scan.xml -mode htb
+  command-producing-urls | hawkprobe -stdin -mode exposure
   hawkprobe rules list
   hawkprobe rules stats
   hawkprobe rules validate custom-rules.json
@@ -314,10 +343,13 @@ modes:
   tech        technology fingerprinting
 
 input:
-  -list file           plain URLs/hosts, Nmap XML, Nmap -oG, or httpx JSONL
+  -list file           plain URLs/hosts, Nmap XML/-oG/normal output, or httpx JSONL
   -list -              read targets from stdin
+  -nmap file           friendly alias for -list with Nmap output
+  -stdin               friendly alias for -list -
   -wordlist file       path discovery wordlist
   -wordlist @common    auto-find a SecLists preset
+  -seclists common     friendly alias for -wordlist @common
   -ext php,txt,bak     add extensions to extensionless wordlist entries
 
 scan selection:
@@ -360,9 +392,9 @@ terminal/output:
 examples:
   hawkprobe http://10.10.10.10 -mode htb
   hawkprobe box.htb:80 -mode htb -evidence
-  hawkprobe -list scan.xml -mode htb -target-c 8
-  httpx -l hosts.txt -json | hawkprobe -list - -mode exposure
-  hawkprobe http://box.htb -mode htb -wordlist @common -ext php,bak
+  hawkprobe -nmap scan.xml -mode htb -target-c 8
+  httpx -l hosts.txt -silent | hawkprobe -stdin -mode exposure
+  hawkprobe http://box.htb -mode htb -seclists common -ext php,bak
   hawkprobe http://box.htb -wordlist @dirs-medium -c 80 -rate 250
   hawkprobe https://app.lab -mode full -category cloud,devops
   hawkprobe https://app.lab -mode full -severity medium
