@@ -8,8 +8,8 @@ import (
 var completionWords = []string{
 	"help", "version", "doctor", "wordlists", "rules", "completion",
 	"quick", "default", "full", "deep", "htb", "exposure", "admin", "api", "debug", "headers", "tls", "tech",
-	"-mode", "-profile", "-c", "-target-c", "-rate", "-timeout", "-discover", "-wordlist", "-ext",
-	"-list", "-category", "-tag", "-severity", "-fail-on", "-v", "-evidence", "-rules",
+	"-mode", "-profile", "-c", "-target-c", "-rate", "-timeout", "-discover", "-wordlist", "-seclists", "-ext",
+	"-list", "-nmap", "-stdin", "-category", "-tag", "-severity", "-fail-on", "-v", "-evidence", "-rules",
 	"-H", "-host", "-user", "-pass", "-token", "-proxy", "-ua", "-no-redirect", "-max-redirects", "-k",
 	"-json", "-jsonl", "-csv", "-sarif", "-o", "-urls-out", "-no-progress", "-no-color", "-q",
 }
