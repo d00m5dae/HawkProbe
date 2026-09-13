@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.0 (development)
+
+- Added Nmap import from XML, grepable (`-oG`), and normal saved output
+- Added stdin URL ingestion for pipelines such as `httpx | hawkprobe -stdin`
+- Added first-class SecLists presets, common install autodetection, `SECLISTS_DIR`, and custom roots
+- Added a global progress bar that stays on stderr
+- Added per-target request rate limiting
+- Added severity, category, include-tag, and exclude-tag filters
+- Added `-fail-on` CI severity thresholds with exit code 3
+- Added CSV output
+- Added SARIF 2.1.0 output
+- Added shell completion output for bash, zsh, and fish
+- Added `hawkprobe rules stats`
+- Expanded the built-in rule database to more than 350 deduplicated checks
+- Added large backup/editor-copy coverage across common application and configuration files
+- Expanded cloud, CI/CD, container, admin, API, debug, health, monitoring, log, database, and development-metadata coverage
+- Added Nmap, SecLists, rule-filter, SARIF, and rule-count tests
+- Added CONTRIBUTING.md and SECURITY.md
+- Reworked the README around Nmap, httpx, SecLists, automation, and HTB workflows
+
 ## 1.2.0 (development)
 
 - Added scan modes: `quick`, `default`, `full`, `deep`, `htb`, `exposure`, `admin`, `api`, `debug`, `headers`, `tls`, and `tech`
