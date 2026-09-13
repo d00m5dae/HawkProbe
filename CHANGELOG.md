@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0 (development)
+
+- Added automatic Nmap XML and grepable-output target import through `-list`
+- Added stdin target ingestion with `-list -`
+- Added httpx JSONL input support
+- Added SecLists auto-discovery and presets such as `@common`, `@dirs-medium`, `@graphql`, and `@mcp`
+- Raised wordlist generation limits for large RAFT/SecLists scans
+- Added adaptive terminal progress bars with automatic suppression for scripts and structured output
+- Added colored terminal findings with `NO_COLOR` and `-no-color` support
+- Added quiet output with `-q`
+- Added per-target request pacing with `-rate`
+- Added category, tag, and minimum-severity filtering
+- Added `-urls-out` for chaining discovered URLs into Nuclei, httpx, ffuf, and similar tools
+- Added `hawkprobe doctor` and `hawkprobe wordlists`
+- Added CSV findings output
+- Added SARIF 2.1.0 output for security/CI tooling
+- Added `-fail-on` severity thresholds with exit code 3 for CI pipelines
+- Added bash, zsh, and fish completion generation
+- Expanded the built-in catalog by hundreds of checks across VCS, configuration, backups, cloud, DevOps, admin, API, CMS/framework, debug, source/build, and metadata exposure classes
+- Added automatic generated-rule ID and request de-duplication
+- Added Nmap, httpx, SecLists, report-format, filtering, and minimum-catalog-size tests
+- Added CONTRIBUTING.md, SECURITY.md, issue templates, and a pull-request template
+- Reworked the README around practical pentest/HTB and automation workflows
+
 ## 1.2.0 (development)
 
 - Added scan modes: `quick`, `default`, `full`, `deep`, `htb`, `exposure`, `admin`, `api`, `debug`, `headers`, `tls`, and `tech`
