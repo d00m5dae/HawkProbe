@@ -1,0 +1,11 @@
+hawkprobe
+hawkprobe.exe
+*.test
+coverage.out
+*.prof
+results.json
+results.jsonl
+*.log
+.DS_Store
+.vscode/
+.idea/
