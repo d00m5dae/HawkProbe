@@ -107,11 +107,13 @@ func parseFlags() (options, error) {
 	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
 	fs.IntVar(&opts.Concurrency, "c", 32, "concurrent requests per target")
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
+	fs.IntVar(&opts.Rate, "rate", 0, "maximum requests per second per target (0 = unlimited)")
 	fs.DurationVar(&opts.Timeout, "timeout", 6*time.Second, "request timeout")
 	fs.BoolVar(&opts.Insecure, "k", false, "allow invalid TLS certificates")
 	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
 	fs.BoolVar(&opts.JSONL, "jsonl", false, "JSON Lines output")
 	fs.StringVar(&opts.Output, "o", "", "write output to a file")
+	fs.StringVar(&opts.URLsOut, "urls-out", "", "write unique target/finding URLs for nuclei/httpx/ffuf pipelines")
 	fs.Var(&opts.Headers, "H", "custom header, repeatable: 'Name: value'")
 	fs.StringVar(&opts.User, "user", "", "basic auth username")
 	fs.StringVar(&opts.Pass, "pass", "", "basic auth password")
@@ -153,6 +155,9 @@ func parseFlags() (options, error) {
 	if opts.TargetConcurrency < 1 || opts.TargetConcurrency > 64 {
 		return opts, errors.New("target-c must be between 1 and 64")
 	}
+	if opts.Rate < 0 || opts.Rate > 10000 {
+		return opts, errors.New("rate must be between 0 and 10000 requests/second")
+	}
 	if opts.Timeout < 500*time.Millisecond {
 		return opts, errors.New("timeout must be at least 500ms")
 	}
@@ -177,7 +182,7 @@ func parseFlags() (options, error) {
 }
 
 func reorderArgs(args []string) []string {
-	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-c": true, "-target-c": true, "-timeout": true, "-o": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
+	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-c": true, "-target-c": true, "-rate": true, "-timeout": true, "-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -266,6 +271,7 @@ scan options:
   -mode string          scan mode (default "default")
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
+  -rate int             requests/sec per target; 0 = unlimited
   -timeout duration     request timeout (default 6s)
   -discover             parse robots/sitemap and probe discovered paths
   -v                    show every rule check
@@ -285,6 +291,7 @@ terminal/output:
   -q                    only print findings and errors
   -no-progress          disable adaptive progress bar
   -no-color             disable ANSI colors
+  -urls-out file        unique URLs for nuclei/httpx/ffuf chaining
   -json                 JSON output
   -jsonl                JSON Lines output
   -o file               write output to a file
@@ -295,7 +302,9 @@ examples:
   hawkprobe -list scan.xml -mode htb -target-c 8
   httpx -l hosts.txt -json | hawkprobe -list - -mode exposure
   hawkprobe http://box.htb -mode htb -wordlist @common -ext php,bak
-  hawkprobe http://box.htb -wordlist @dirs-medium -c 80
+  hawkprobe http://box.htb -wordlist @dirs-medium -c 80 -rate 250
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
+  hawkprobe https://app.lab -mode full -urls-out discovered.txt
+  nuclei -l discovered.txt
   hawkprobe rules validate custom-rules.json`)
 }
