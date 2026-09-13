@@ -40,7 +40,7 @@ func (p *progressTracker) Add(n int) {
 		return
 	}
 	p.last = now
-	p.render(false)
+	p.render()
 }
 
 func (p *progressTracker) Finish() {
@@ -52,25 +52,22 @@ func (p *progressTracker) Finish() {
 	if p.closed {
 		return
 	}
+	p.done = p.total
 	p.closed = true
-	p.render(true)
+	p.render()
 	fmt.Fprintln(os.Stderr)
 }
 
-func (p *progressTracker) render(final bool) {
+func (p *progressTracker) render() {
 	if p.total <= 0 {
 		return
 	}
-	done := p.done
-	if final && done > p.total {
-		done = p.total
-	}
-	percent := float64(done) / float64(p.total)
+	percent := float64(p.done) / float64(p.total)
 	filled := int(percent * float64(p.width))
 	if filled > p.width {
 		filled = p.width
 	}
 	bar := strings.Repeat("#", filled) + strings.Repeat("-", p.width-filled)
 	elapsed := time.Since(p.started).Round(100 * time.Millisecond)
-	fmt.Fprintf(os.Stderr, "\r[%s] %3.0f%%  %d/%d checks  %s", bar, percent*100, done, p.total, elapsed)
+	fmt.Fprintf(os.Stderr, "\r[%s] %3.0f%%  %d/%d checks  %s", bar, percent*100, p.done, p.total, elapsed)
 }
