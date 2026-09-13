@@ -112,3 +112,22 @@ func statusAllowed(status int, allowed []int) bool {
 	}
 	return false
 }
+
+func hasTag(tags []string, want string) bool {
+	for _, tag := range tags {
+		if strings.EqualFold(tag, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func joinURL(base, path string) string {
+	if path == "" {
+		return base
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
+}

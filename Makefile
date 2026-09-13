@@ -1,5 +1,5 @@
 BINARY := hawkprobe
-VERSION ?= 1.1.0
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 PREFIX ?= /usr/local
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
@@ -18,6 +18,7 @@ uninstall:
 test:
 	GOTOOLCHAIN=local go test ./...
 	GOTOOLCHAIN=local go vet ./...
+	GOTOOLCHAIN=local go test -race ./...
 
 clean:
 	rm -f $(BINARY)
