@@ -17,7 +17,7 @@ It is built for the part of a pentest where you already have HTTP services and w
 - **450+ built-in checks** across exposure, backup, cloud, DevOps, admin, API, debug, CMS/framework, source/build, and metadata classes.
 - **Fast by default** — concurrent Go HTTP engine, connection reuse, HTTP/2, multi-target workers, and optional request pacing.
 - **Useful on HTB/CTFs** — `htb` mode, Host-header overrides, exposed-file checks, framework/debug discovery, and optional SecLists enumeration.
-- **Pipeline friendly** — plain files, stdin, Nmap XML, Nmap grepable output, and httpx JSONL can all become scan targets.
+- **Pipeline friendly** — plain files, stdin, Nmap XML, Nmap grepable/normal output, and httpx JSONL can all become scan targets.
 - **No runtime stack** — one Go binary; no Python, Perl, Node, Docker, or template engine required.
 - **Low-noise design** — randomized missing-path baselines help reject wildcard routes and soft 404s.
 - **Readable findings** — severity, category, confidence, evidence, remediation, URL, and structured JSON/JSONL/CSV/SARIF output.
@@ -110,18 +110,31 @@ hawkprobe rules stats
 
 ## Nmap compatibility
 
-HawkProbe auto-detects Nmap XML and grepable output passed with `-list`.
+HawkProbe understands Nmap XML, grepable (`-oG`), and normal saved text output.
 
 ```bash
 nmap -sV -p- -oX scan.xml 10.10.10.10
+hawkprobe -nmap scan.xml -mode htb
+```
+
+`-nmap` is just a friendly alias over the same auto-detect input pipeline, so this works too:
+
+```bash
 hawkprobe -list scan.xml -mode htb
 ```
 
-Or pipe grepable output directly:
+Pipe grepable output directly:
 
 ```bash
 nmap -sV -p80,443,8000,8080,8443 -oG - 10.10.10.10 \
-  | hawkprobe -list - -mode htb
+  | hawkprobe -stdin -mode htb
+```
+
+A normal text report can also be reused:
+
+```bash
+nmap -sV -p- -oN scan.txt 10.10.10.10
+hawkprobe -nmap scan.txt -mode htb
 ```
 
 Only open services that look like HTTP/HTTPS are converted into targets. Common alternate web ports are recognized even when Nmap does not return a useful service name.
@@ -131,14 +144,16 @@ Only open services that look like HTTP/HTTPS are converted into targets. Common 
 httpx JSONL can be fed directly to HawkProbe:
 
 ```bash
-httpx -l hosts.txt -json | hawkprobe -list - -mode exposure
+httpx -l hosts.txt -json | hawkprobe -stdin -mode exposure
 ```
 
 Plain URLs/hosts on stdin work too:
 
 ```bash
-cat targets.txt | hawkprobe -list - -mode default
+cat targets.txt | hawkprobe -stdin -mode default
 ```
+
+`-stdin` is equivalent to `-list -`.
 
 ## SecLists without the giant path
 
@@ -155,6 +170,13 @@ hawkprobe http://box.htb -mode htb -wordlist @common
 hawkprobe http://box.htb -wordlist @dirs-small
 hawkprobe http://box.htb -wordlist @dirs-medium -c 80
 hawkprobe http://box.htb -wordlist @graphql
+```
+
+Or use the friendlier alias:
+
+```bash
+hawkprobe http://box.htb -mode htb -seclists common
+hawkprobe http://box.htb -seclists dirs-medium -ext php,bak,txt
 ```
 
 Useful aliases include:
