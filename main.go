@@ -27,6 +27,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "rules:", err)
 		os.Exit(2)
 	}
+	rules = filterRules(rules, opts.CategoryFilter, opts.TagFilter)
 	if opts.Wordlist != "" {
 		wordRules, err := loadWordlistRules(opts.Wordlist, opts.Extensions)
 		if err != nil {
@@ -41,6 +42,7 @@ func main() {
 		os.Exit(2)
 	}
 	results := scanTargets(opts, targets, rules)
+	results = filterResultSeverity(results, opts.MinSeverity)
 	if err := outputResults(results, opts); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -74,6 +76,10 @@ func handleCommand(args []string) bool {
 		}
 		return true
 	case "rules":
+		if len(args) >= 2 && args[1] == "stats" {
+			printRuleStats()
+			return true
+		}
 		if len(args) >= 3 && args[1] == "validate" {
 			if err := validateRulesFile(args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, "invalid:", err)
@@ -105,6 +111,9 @@ func parseFlags() (options, error) {
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
 	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
+	fs.StringVar(&opts.CategoryFilter, "category", "", "only scan comma-separated rule categories")
+	fs.StringVar(&opts.TagFilter, "tag", "", "only scan rules matching comma-separated tags")
+	fs.StringVar(&opts.MinSeverity, "severity", "", "only output findings at or above info/low/medium/high/critical")
 	fs.IntVar(&opts.Concurrency, "c", 32, "concurrent requests per target")
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
 	fs.IntVar(&opts.Rate, "rate", 0, "maximum requests per second per target (0 = unlimited)")
@@ -167,6 +176,9 @@ func parseFlags() (options, error) {
 	if opts.JSON && opts.JSONL {
 		return opts, errors.New("use either -json or -jsonl")
 	}
+	if !validSeverityName(opts.MinSeverity) {
+		return opts, fmt.Errorf("invalid severity %q", opts.MinSeverity)
+	}
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
 	opts.Mode = lower(opts.Mode)
 	if !validModes[opts.Mode] {
@@ -182,7 +194,7 @@ func parseFlags() (options, error) {
 }
 
 func reorderArgs(args []string) []string {
-	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-c": true, "-target-c": true, "-rate": true, "-timeout": true, "-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
+	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-category": true, "-tag": true, "-severity": true, "-c": true, "-target-c": true, "-rate": true, "-timeout": true, "-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -242,6 +254,7 @@ usage:
   hawkprobe -list nmap.xml -mode htb
   nmap ... -oG - | hawkprobe -list - -mode htb
   hawkprobe rules list
+  hawkprobe rules stats
   hawkprobe rules validate custom-rules.json
   hawkprobe wordlists
   hawkprobe doctor
@@ -267,8 +280,13 @@ input:
   -wordlist @common    auto-find a SecLists preset
   -ext php,txt,bak     add extensions to extensionless wordlist entries
 
-scan options:
+scan selection:
   -mode string          scan mode (default "default")
+  -category list        only categories, e.g. cloud,devops,backup
+  -tag list             only tags, e.g. htb,exposure
+  -severity level       only output findings at/above a severity
+
+scan options:
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
   -rate int             requests/sec per target; 0 = unlimited
@@ -303,6 +321,8 @@ examples:
   httpx -l hosts.txt -json | hawkprobe -list - -mode exposure
   hawkprobe http://box.htb -mode htb -wordlist @common -ext php,bak
   hawkprobe http://box.htb -wordlist @dirs-medium -c 80 -rate 250
+  hawkprobe https://app.lab -mode full -category cloud,devops
+  hawkprobe https://app.lab -mode full -severity medium
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
   hawkprobe https://app.lab -mode full -urls-out discovered.txt
   nuclei -l discovered.txt
