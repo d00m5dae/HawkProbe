@@ -41,6 +41,13 @@ func outputResults(results []scanResult, opts options) error {
 		defer f.Close()
 		w = f
 	}
+
+	if opts.SARIF {
+		return outputSARIF(w, results)
+	}
+	if opts.CSV {
+		return outputCSV(w, results)
+	}
 	if opts.JSONL {
 		enc := json.NewEncoder(w)
 		for _, r := range results {
