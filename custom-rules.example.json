@@ -1,0 +1,17 @@
+[
+  {
+    "id": "internal-health",
+    "path": "/internal/health",
+    "name": "internal health endpoint exposed",
+    "severity": "low",
+    "statuses": [200],
+    "contains": ["healthy", "ok"]
+  },
+  {
+    "id": "custom-panel",
+    "path": "/private-panel",
+    "name": "private panel found",
+    "severity": "info",
+    "statuses": [200, 401, 403]
+  }
+]
