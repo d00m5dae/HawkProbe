@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"errors"
+	"net"
 	"net/url"
-	"os"
+	"strconv"
 	"strings"
 )
 
@@ -25,7 +25,18 @@ func normalizeTarget(raw string) (string, error) {
 		return "", errors.New("empty target")
 	}
 	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
+		scheme := "https"
+		if _, port, err := net.SplitHostPort(raw); err == nil {
+			if n, err := strconv.Atoi(port); err == nil && !isLikelyTLSPort(n) {
+				scheme = "http"
+			}
+		} else if strings.Count(raw, ":") == 1 {
+			parts := strings.SplitN(raw, ":", 2)
+			if n, err := strconv.Atoi(parts[1]); err == nil && !isLikelyTLSPort(n) {
+				scheme = "http"
+			}
+		}
+		raw = scheme + "://" + raw
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
@@ -38,28 +49,26 @@ func normalizeTarget(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+func isLikelyTLSPort(port int) bool {
+	switch port {
+	case 443, 4443, 5443, 6443, 7443, 8443, 9443, 10443:
+		return true
+	default:
+		return false
+	}
+}
+
 func loadTargets(single, listFile string) ([]string, error) {
 	var raw []string
 	if single != "" {
 		raw = append(raw, single)
 	}
 	if listFile != "" {
-		f, err := os.Open(listFile)
+		items, err := readTargetSource(listFile)
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
-		s := bufio.NewScanner(f)
-		for s.Scan() {
-			line := strings.TrimSpace(s.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			raw = append(raw, line)
-		}
-		if err := s.Err(); err != nil {
-			return nil, err
-		}
+		raw = append(raw, items...)
 	}
 	if len(raw) == 0 {
 		return nil, errors.New("one target or -list file is required")
