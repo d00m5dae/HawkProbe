@@ -53,6 +53,9 @@ type rule struct {
 type options struct {
 	Target            string
 	ListFile          string
+	InputFile         string
+	InputFormat       string
+	NmapFile          string
 	RuleFile          string
 	Mode              string
 	Concurrency       int
@@ -61,6 +64,7 @@ type options struct {
 	Insecure          bool
 	JSON              bool
 	JSONL             bool
+	OutputFormat      string
 	Output            string
 	Headers           headerList
 	User              string
@@ -75,19 +79,31 @@ type options struct {
 	Evidence          bool
 	Discover          bool
 	Wordlist          string
+	SecList           string
 	Extensions        string
+	WordlistLimit     int
+	Progress          bool
+	Quiet             bool
+	MinSeverity       string
+	IncludeCategory   string
+	ExcludeCategory   string
 }
 
 type scanResult struct {
-	Target       string    `json:"target"`
-	Status       string    `json:"status,omitempty"`
-	DurationMS   int64     `json:"duration_ms"`
-	Requests     int       `json:"requests"`
-	RulesChecked int       `json:"rules_checked,omitempty"`
-	NoMatch      int       `json:"no_match,omitempty"`
-	Skipped      int       `json:"skipped,omitempty"`
-	Findings     []finding `json:"findings"`
-	Error        string    `json:"error,omitempty"`
+	Target        string    `json:"target"`
+	Status        string    `json:"status,omitempty"`
+	Title         string    `json:"title,omitempty"`
+	FinalURL      string    `json:"final_url,omitempty"`
+	ContentType   string    `json:"content_type,omitempty"`
+	ContentLength int64     `json:"content_length,omitempty"`
+	Server        string    `json:"server,omitempty"`
+	DurationMS    int64     `json:"duration_ms"`
+	Requests      int       `json:"requests"`
+	RulesChecked  int       `json:"rules_checked,omitempty"`
+	NoMatch       int       `json:"no_match,omitempty"`
+	Skipped       int       `json:"skipped,omitempty"`
+	Findings      []finding `json:"findings"`
+	Error         string    `json:"error,omitempty"`
 }
 
 type ruleStats struct {
