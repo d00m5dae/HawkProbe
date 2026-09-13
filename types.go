@@ -55,13 +55,21 @@ type options struct {
 	ListFile          string
 	RuleFile          string
 	Mode              string
+	CategoryFilter    string
+	TagFilter         string
+	MinSeverity       string
+	FailOn            string
 	Concurrency       int
 	TargetConcurrency int
+	Rate              int
 	Timeout           time.Duration
 	Insecure          bool
 	JSON              bool
 	JSONL             bool
+	CSV               bool
+	SARIF             bool
 	Output            string
+	URLsOut           string
 	Headers           headerList
 	User              string
 	Pass              string
@@ -76,6 +84,9 @@ type options struct {
 	Discover          bool
 	Wordlist          string
 	Extensions        string
+	NoProgress        bool
+	NoColor           bool
+	Quiet             bool
 }
 
 type scanResult struct {
