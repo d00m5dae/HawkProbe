@@ -52,42 +52,68 @@ func outputResults(results []scanResult, opts options) error {
 		}
 		return enc.Encode(results)
 	}
+
+	useColor := colorEnabled(opts, w)
+	if opts.Quiet {
+		return outputQuiet(w, results, useColor)
+	}
+
 	for i, r := range results {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintf(w, "%s", r.Target)
+		header := r.Target
 		if r.Status != "" {
-			fmt.Fprintf(w, "  %s", r.Status)
+			header += "  " + r.Status
 		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(w, colorize(useColor, ansiBold+ansiCyan, header))
 		if r.Error != "" {
-			fmt.Fprintf(w, "[error] %s\n", r.Error)
+			fmt.Fprintf(w, "%s %s\n", colorize(useColor, ansiRed, "[error]"), r.Error)
 			continue
 		}
 		if len(r.Findings) == 0 {
-			fmt.Fprintln(w, "no findings")
+			fmt.Fprintln(w, colorize(useColor, ansiDim, "no findings"))
 		} else {
 			for _, finding := range r.Findings {
-				prefix := "[" + finding.Level + "]"
+				prefix := colorize(useColor, severityColor(finding.Severity), "["+finding.Level+"]")
 				if finding.Category != "" {
-					fmt.Fprintf(w, "%-6s %-11s %s", prefix, "["+finding.Category+"]", finding.Message)
+					category := colorize(useColor, ansiDim, "["+finding.Category+"]")
+					fmt.Fprintf(w, "%-15s %-20s %s", prefix, category, finding.Message)
 				} else {
-					fmt.Fprintf(w, "%-6s %s", prefix, finding.Message)
+					fmt.Fprintf(w, "%-15s %s", prefix, finding.Message)
 				}
 				if finding.URL != "" && finding.URL != r.Target {
 					fmt.Fprintf(w, "  %s", finding.URL)
 				}
 				fmt.Fprintln(w)
 				if opts.Evidence && finding.Evidence != "" {
-					fmt.Fprintf(w, "        evidence: %s\n", finding.Evidence)
+					fmt.Fprintf(w, "        %s %s\n", colorize(useColor, ansiDim, "evidence:"), finding.Evidence)
 				}
 				if opts.Evidence && finding.Remediation != "" {
-					fmt.Fprintf(w, "        fix: %s\n", finding.Remediation)
+					fmt.Fprintf(w, "        %s %s\n", colorize(useColor, ansiDim, "fix:"), finding.Remediation)
 				}
 			}
 		}
-		fmt.Fprintf(w, "\n%d rules checked, %d requests, %d findings, %d no-match, %d skipped in %.2fs\n", r.RulesChecked, r.Requests, len(r.Findings), r.NoMatch, r.Skipped, float64(r.DurationMS)/1000)
+		summary := fmt.Sprintf("%d rules · %d requests · %d findings · %d clean · %d skipped · %.2fs", r.RulesChecked, r.Requests, len(r.Findings), r.NoMatch, r.Skipped, float64(r.DurationMS)/1000)
+		fmt.Fprintf(w, "\n%s\n", colorize(useColor, ansiDim, summary))
+	}
+	return nil
+}
+
+func outputQuiet(w io.Writer, results []scanResult, useColor bool) error {
+	for _, r := range results {
+		if r.Error != "" {
+			fmt.Fprintf(w, "%s %s %s\n", r.Target, colorize(useColor, ansiRed, "[error]"), r.Error)
+			continue
+		}
+		for _, finding := range r.Findings {
+			prefix := colorize(useColor, severityColor(finding.Severity), "["+finding.Level+"]")
+			url := finding.URL
+			if url == "" {
+				url = r.Target
+			}
+			fmt.Fprintf(w, "%s %s %s\n", prefix, url, finding.Message)
+		}
 	}
 	return nil
 }
