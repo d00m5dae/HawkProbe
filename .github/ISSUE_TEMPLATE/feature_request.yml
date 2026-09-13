@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a scanner, UX, performance, or integration improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What pentest/scanning workflow is awkward or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Show the CLI/workflow you would want to use.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention other tools/workarounds when relevant.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Area
+      options:
+        - Scanner engine
+        - Built-in rules
+        - Wordlist/discovery
+        - Input/output integration
+        - CLI / terminal UX
+        - Performance
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Scope check
+      options:
+        - label: The requested default behavior can be implemented non-destructively for authorized testing.
+          required: true
