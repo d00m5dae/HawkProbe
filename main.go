@@ -78,10 +78,24 @@ func handleCommand(args []string) bool {
 	case "version", "-version", "--version":
 		fmt.Printf("hawkprobe %s\n", version)
 		return true
+	case "completion":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: hawkprobe completion bash|zsh|fish")
+			os.Exit(2)
+		}
+		if err := printCompletion(args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return true
 	case "seclists":
 		printSecListsPresets()
 		return true
 	case "rules":
+		if len(args) >= 2 && args[1] == "stats" {
+			printRuleStats()
+			return true
+		}
 		if len(args) >= 3 && args[1] == "validate" {
 			if err := validateRulesFile(args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, "invalid:", err)
@@ -279,8 +293,10 @@ usage:
   hawkprobe -nmap scan.xml [options]
   command-producing-urls | hawkprobe -stdin [options]
   hawkprobe rules list
+  hawkprobe rules stats
   hawkprobe rules validate custom-rules.json
   hawkprobe seclists
+  hawkprobe completion bash|zsh|fish
   hawkprobe version
 
 modes:
