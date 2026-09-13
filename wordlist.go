@@ -7,19 +7,16 @@ import (
 	"strings"
 )
 
-func loadWordlistRules(path, extensions string) ([]rule, error) {
-	return loadWordlistRulesLimit(path, extensions, 50000)
-}
-
-func loadWordlistRulesLimit(path, extensions string, limit int) ([]rule, error) {
+func loadWordlistRules(path, extensions string, limits ...int) ([]rule, error) {
+	limit := 50000
+	if len(limits) > 0 && limits[0] > 0 {
+		limit = limits[0]
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	if limit < 1 {
-		limit = 50000
-	}
 
 	var exts []string
 	for _, ext := range strings.Split(extensions, ",") {
