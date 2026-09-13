@@ -1,12 +1,25 @@
 # HawkProbe
 
-HawkProbe is a fast, lightweight web exposure and configuration scanner written in Go.
+HawkProbe is a fast web exposure and misconfiguration scanner written in Go.
 
-It is designed around a small concurrent scanning engine, built-in rule profiles, custom JSON rules, clean terminal output, and easy automation.
+It is built for authorized pentesting, HTB/CTF labs, homelabs, and defensive web auditing. The scanner combines a concurrent path engine with HTTP/TLS checks, technology fingerprinting, soft-404 filtering, optional content discovery, and structured output.
 
-- Repository: https://github.com/d00m5dae/HawkProbe
-- Releases: https://github.com/d00m5dae/HawkProbe/releases
-- Issues: https://github.com/d00m5dae/HawkProbe/issues
+## Highlights
+
+- 159 built-in path rules organized by purpose instead of one giant flat list
+- Concurrent requests per target and concurrent multi-target scanning
+- Scan modes for quick checks, broad scans, HTB/CTF work, APIs, admin surfaces, debug endpoints, exposure checks, headers, TLS, and fingerprinting
+- Two-sample soft-404 baseline detection to reduce wildcard/custom-404 false positives
+- Active but non-destructive CORS and HTTP method checks
+- `robots.txt` and `sitemap.xml` discovery
+- Optional wordlist discovery with extension expansion
+- Response checks for exposed secrets, private keys, stack traces, source-map references, and interesting HTML comments
+- Technology fingerprinting for common web servers, frameworks, CDNs, and applications
+- TLS certificate, expiry, hostname, and negotiated-version reporting
+- Detailed finding metadata: category, confidence, evidence, and remediation
+- JSON and JSONL output for automation
+- Custom JSON rules with regex, headers, methods, status codes, content-type matching, and exclusions
+- Go 1.20+ with no runtime dependency beyond the compiled binary
 
 ## Install
 
@@ -26,123 +39,142 @@ irm https://raw.githubusercontent.com/d00m5dae/HawkProbe/main/install.ps1 | iex
 
 ### From source
 
-Requires Go 1.20 or newer.
-
 ```bash
 git clone https://github.com/d00m5dae/HawkProbe.git
 cd HawkProbe
 sh install.sh
 ```
 
-You can also use Go directly:
+Or:
 
 ```bash
 go install github.com/d00m5dae/HawkProbe@latest
 ```
 
-## Usage
-
-```text
-hawkprobe [options] <url>
-hawkprobe -list targets.txt [options]
-hawkprobe rules
-hawkprobe version
-```
-
-Basic scan:
+## Basic usage
 
 ```bash
 hawkprobe https://example.com
 ```
 
-Quick scan:
+Flags can go before or after the target:
 
 ```bash
-hawkprobe -profile quick https://example.com
+hawkprobe -mode full -c 64 https://example.com
+hawkprobe https://example.com -mode full -c 64
 ```
 
-Full scan:
+HTB/CTF-oriented scan:
 
 ```bash
-hawkprobe -profile full -c 64 https://example.com
+hawkprobe http://box.htb -mode htb -v
 ```
 
-Multiple authorized targets:
+Show evidence and remediation:
 
 ```bash
-hawkprobe -list targets.txt
+hawkprobe https://example.com -mode exposure -evidence
 ```
 
-JSON Lines for automation:
+Virtual host against an IP:
 
 ```bash
-hawkprobe -list targets.txt -jsonl -o results.jsonl
+hawkprobe http://10.10.10.10 -host internal.htb -mode htb
 ```
 
-Custom headers:
+Multiple targets:
 
 ```bash
-hawkprobe -H "X-Test: 1" -H "Accept-Language: en-US" https://example.com
+hawkprobe -list targets.txt -target-c 8
 ```
 
-Basic authentication:
+## Scan modes
+
+| Mode | Purpose |
+| --- | --- |
+| `quick` | Small set of high-value checks |
+| `default` | Balanced everyday scan |
+| `full` / `deep` | Broad path coverage plus discovery |
+| `htb` | HTB/CTF-oriented discovery, exposures, admin, API, and debug checks |
+| `exposure` | Secrets, backups, VCS metadata, configs, logs |
+| `admin` | Admin, login, and management surfaces |
+| `api` | Swagger/OpenAPI, GraphQL, and API docs |
+| `debug` | pprof, Actuator, traces, metrics, diagnostic pages |
+| `headers` | Headers, cookies, CORS, and HTTP methods |
+| `tls` | TLS/certificate checks only |
+| `tech` | Technology fingerprinting only |
+
+The old `-profile` flag remains available as an alias for `-mode`.
+
+## HTB content discovery
+
+HawkProbe can use a path wordlist while keeping the same soft-404 filtering used by built-in rules:
 
 ```bash
-hawkprobe -user username -pass password https://example.com
+hawkprobe http://box.htb -mode htb -wordlist paths.txt
 ```
 
-Bearer authentication:
+Add extensions:
 
 ```bash
-hawkprobe -token TOKEN https://example.com
+hawkprobe http://box.htb -mode htb -wordlist paths.txt -ext php,txt,bak
 ```
 
-Proxy:
+For example, a word `admin` generates checks for:
+
+```text
+/admin
+/admin.php
+/admin.txt
+/admin.bak
+```
+
+The generated discovery set is capped to avoid accidentally creating an unbounded scan.
+
+## Discovery
+
+Enable dynamic discovery explicitly:
 
 ```bash
-hawkprobe -proxy http://127.0.0.1:8080 https://example.com
+hawkprobe https://example.com -discover
 ```
 
-## Profiles
+`full`, `deep`, and `htb` enable it automatically. HawkProbe parses same-host paths from `robots.txt` and `sitemap.xml`, probes a bounded number of them, and filters likely custom-404 responses.
 
-HawkProbe v1.1 ships with 74 built-in rules.
+## Built-in coverage
 
-| Profile | Built-in rules | Use |
-| --- | ---: | --- |
-| `quick` | 12 | Fast common exposure checks |
-| `default` | 34 | Normal scans |
-| `full` | 74 | Complete built-in rule set |
+HawkProbe includes checks for categories such as:
 
-The scanner also performs checks that are not part of the path rule count, including security headers, cookie flags, TLS certificate health, directory listing detection, CORS configuration, and basic technology fingerprinting.
+- Git, SVN, Mercurial, and Bazaar metadata
+- `.env` files and application configuration
+- AWS, Docker, Kubernetes, Terraform, and key material
+- ZIP/TAR backups, source archives, SQL dumps, editor backups
+- Apache status/info, PHP info, Go pprof, Spring Boot Actuator, ELMAH, metrics
+- Admin/login panels, Tomcat manager, WordPress, phpMyAdmin, Grafana, Jenkins, Kibana
+- Swagger/OpenAPI, GraphQL, GraphiQL, ReDoc, API roots
+- Logs, package manifests, build files, CI configs, source maps
+- Security headers, cookie flags, CORS, HTTP methods
+- TLS certificate validity, expiry, hostname, and negotiated protocol
+- Technology markers for nginx, Apache, IIS, Caddy, Cloudflare, PHP, ASP.NET, Express, WordPress, Next.js, Laravel, Django, Grafana, Jenkins, and Spring Boot
+- Response-body indicators for private keys, access keys, generic secrets, stack traces, debug errors, source maps, and useful HTML comments
 
-## Built-in checks
+## Verbose mode
 
-HawkProbe can identify or check for:
+```bash
+hawkprobe http://box.htb -mode htb -v
+```
 
-- Exposed Git, SVN, Mercurial, and Bazaar metadata
-- `.env` and environment configuration files
-- Backup archives and database dumps
-- Common application and framework configuration files
-- Exposed private keys and cloud/Kubernetes credential files
-- `phpinfo`, Apache status/info, pprof, Spring Boot actuator, metrics, and trace endpoints
-- Admin, login, WordPress, phpMyAdmin, Grafana, and Jenkins endpoints
-- Swagger/OpenAPI and GraphQL endpoints
-- Exposed logs and build/dependency files
-- HSTS, CSP, frame protection, Referrer-Policy, Permissions-Policy, and X-Content-Type-Options
-- Cookie `Secure`, `HttpOnly`, and `SameSite` flags
-- Directory listing
-- TLS certificate validity, hostname matching, expiry, and legacy TLS negotiation
-- Server and `X-Powered-By` disclosure
-- Basic technology fingerprinting for nginx, Apache, IIS, Cloudflare, PHP, ASP.NET, WordPress, Grafana, and Jenkins
-- Random missing-path baseline filtering to reduce false positives
+Example:
+
+```text
+[check] /.git/HEAD                              404 no-match
+[check] /.env                                   200 FOUND
+[check] /admin                                  302 FOUND
+```
+
+The summary includes rules checked, total requests, findings, no-match checks, skipped checks, and elapsed time.
 
 ## Custom rules
-
-Add your own rules without rebuilding HawkProbe:
-
-```bash
-hawkprobe -rules custom-rules.json https://example.com
-```
 
 Example:
 
@@ -153,76 +185,136 @@ Example:
     "path": "/internal/health",
     "name": "internal health endpoint exposed",
     "severity": "low",
+    "category": "debug",
+    "confidence": "high",
+    "method": "GET",
     "statuses": [200],
-    "contains": ["healthy", "ok"]
+    "contains": ["healthy"],
+    "regex": "(?i)status\\s*[:=]\\s*ok",
+    "content_type": "json",
+    "remediation": "Restrict the health endpoint to trusted networks."
   }
 ]
 ```
 
-Rule fields:
+Useful fields include:
 
-- `id`: stable rule identifier
-- `path`: path to request
-- `name`: finding text
-- `severity`: `info`, `low`, `medium`, or `high`
-- `statuses`: accepted HTTP status codes
-- `contains`: at least one string must appear in the response body
-- `not_contains`: none of these strings may appear
-- `headers`: required response headers; values are optional substring matches
+- `id`, `path`, `name`
+- `severity`: `info`, `low`, `medium`, `high`, `critical`
+- `category`, `confidence`
+- `method`: `GET`, `HEAD`, or `OPTIONS`
+- `statuses`, `exclude_statuses`
+- `contains`, `not_contains`, `regex`
+- `headers`, `content_type`
+- `evidence`, `remediation`
 
-Run this to dump every built-in rule as JSON:
+Validate a rule file before scanning:
+
+```bash
+hawkprobe rules validate custom-rules.json
+```
+
+List built-in rules:
+
+```bash
+hawkprobe rules list
+```
+
+Dump built-in rules as JSON:
 
 ```bash
 hawkprobe rules
 ```
 
-## Options
+## Authentication and proxying
+
+Custom header:
+
+```bash
+hawkprobe -H "X-Test: 1" https://example.com
+```
+
+Basic auth:
+
+```bash
+hawkprobe -user username -pass password https://example.com
+```
+
+Bearer token:
+
+```bash
+hawkprobe -token TOKEN https://example.com
+```
+
+HTTP proxy:
+
+```bash
+hawkprobe -proxy http://127.0.0.1:8080 https://example.com
+```
+
+Secrets supplied through auth flags are not added to normal findings or verbose output.
+
+## Output
+
+JSON:
+
+```bash
+hawkprobe https://example.com -json
+```
+
+JSON Lines across multiple targets:
+
+```bash
+hawkprobe -list targets.txt -jsonl -o results.jsonl
+```
+
+Human-readable evidence:
+
+```bash
+hawkprobe https://example.com -evidence
+```
+
+## Main options
 
 ```text
--profile string       quick, default, or full
+-mode string          scan mode
 -c int                concurrent requests per target
+-target-c int         targets scanned concurrently
 -timeout duration     request timeout
+-discover             parse robots/sitemap and probe discovered paths
+-wordlist file        optional content-discovery wordlist
+-ext php,txt,bak      extensions added to wordlist entries
+-v                    verbose per-check output
+-evidence             show evidence and remediation
 -rules file.json      add custom rules
--list targets.txt     scan targets from a file
--H "Name: value"      custom request header; repeatable
--user string          basic auth username
--pass string          basic auth password
--token string         bearer token
+-list targets.txt     scan multiple targets
+-H "Name: value"      repeatable request header
+-host string          override Host header
+-user / -pass         Basic auth
+-token string         Bearer auth
 -proxy URL            HTTP proxy
 -ua string            custom User-Agent
 -no-redirect          do not follow redirects
--max-redirects int    maximum redirects
+-max-redirects int    redirect limit
 -k                    allow invalid TLS certificates
--json                 JSON output
--jsonl                JSON Lines output
--o file               write output to a file
+-json / -jsonl        structured output
+-o file               output file
 ```
 
 ## Development
 
 ```bash
-make test
-make build
+gofmt -w *.go
+go test ./...
+go vet ./...
+go test -race ./...
 ```
 
-HawkProbe targets Go 1.20 and newer. CI tests multiple Go versions.
-
-## Release
-
-Push a version tag:
-
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
-
-GitHub Actions builds Linux amd64/arm64, macOS amd64/arm64, Windows amd64, and SHA-256 checksums.
+HawkProbe targets Go 1.20 and newer.
 
 ## Scope
 
-HawkProbe is an exposure and configuration scanner. Its default rules use non-destructive HTTP GET requests and do not attempt exploitation.
-
-Only scan systems you own or have permission to test.
+HawkProbe is intended for systems you own or are authorized to test. Normal checks are non-destructive HTTP/TLS probes. It does not deploy payloads, modify remote systems, or attempt persistence.
 
 ## License
 
