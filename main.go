@@ -6,12 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-var version = "1.2.0-dev"
+var version = "1.3.0-dev"
 
 func main() {
 	if handleCommand(os.Args[1:]) {
@@ -27,15 +28,30 @@ func main() {
 		fmt.Fprintln(os.Stderr, "rules:", err)
 		os.Exit(2)
 	}
+	if opts.SecList != "" {
+		path, err := resolveSecList(opts.SecList)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "seclists:", err)
+			os.Exit(2)
+		}
+		opts.Wordlist = path
+	}
 	if opts.Wordlist != "" {
-		wordRules, err := loadWordlistRules(opts.Wordlist, opts.Extensions)
+		wordRules, err := loadWordlistRules(opts.Wordlist, opts.Extensions, opts.WordlistLimit)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "wordlist:", err)
 			os.Exit(2)
 		}
 		rules = append(rules, wordRules...)
 	}
-	targets, err := loadTargets(opts.Target, opts.ListFile)
+	rules = filterRules(rules, opts)
+
+	var targets []string
+	if opts.InputFile != "" {
+		targets, err = loadInputTargets(opts.InputFile, opts.InputFormat)
+	} else {
+		targets, err = loadTargets(opts.Target, opts.ListFile)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -58,6 +74,9 @@ func handleCommand(args []string) bool {
 	case "version", "-version", "--version":
 		fmt.Printf("hawkprobe %s\n", version)
 		return true
+	case "wordlists":
+		printSecListAliases()
+		return true
 	case "rules":
 		if len(args) >= 3 && args[1] == "validate" {
 			if err := validateRulesFile(args[2]); err != nil {
@@ -67,9 +86,13 @@ func handleCommand(args []string) bool {
 			fmt.Println("rules valid")
 			return true
 		}
+		if len(args) >= 2 && args[1] == "stats" {
+			printRuleStats()
+			return true
+		}
 		if len(args) >= 2 && args[1] == "list" {
 			for _, r := range builtinRules {
-				fmt.Printf("%-28s %-10s %-8s %s\n", r.ID, r.Category, r.Severity, r.Path)
+				fmt.Printf("%-28s %-12s %-8s %s\n", r.ID, r.Category, r.Severity, r.Path)
 			}
 			return true
 		}
@@ -81,12 +104,29 @@ func handleCommand(args []string) bool {
 	return false
 }
 
+func printRuleStats() {
+	counts := ruleCategoryCounts(builtinRules)
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	fmt.Printf("%d built-in rules\n", len(builtinRules))
+	for _, key := range keys {
+		fmt.Printf("  %-14s %d\n", key, counts[key])
+	}
+}
+
 func parseFlags() (options, error) {
 	var opts options
 	fs := flag.NewFlagSet("hawkprobe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var profileAlias string
-	fs.StringVar(&opts.ListFile, "list", "", "file containing targets")
+	var noProgress bool
+	fs.StringVar(&opts.ListFile, "list", "", "plain file containing targets")
+	fs.StringVar(&opts.InputFile, "input", "", "tool output or URL file ('-' for stdin)")
+	fs.StringVar(&opts.InputFormat, "input-format", "auto", "auto, plain, nmap-xml, nmap-gnmap, httpx-jsonl, nuclei-jsonl, ferox-jsonl, ffuf-json")
+	fs.StringVar(&opts.NmapFile, "nmap", "", "Nmap XML or grepable output (shortcut for -input)")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
 	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
@@ -94,8 +134,9 @@ func parseFlags() (options, error) {
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
 	fs.DurationVar(&opts.Timeout, "timeout", 6*time.Second, "request timeout")
 	fs.BoolVar(&opts.Insecure, "k", false, "allow invalid TLS certificates")
-	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
-	fs.BoolVar(&opts.JSONL, "jsonl", false, "JSON Lines output")
+	fs.BoolVar(&opts.JSON, "json", false, "legacy alias for -format json")
+	fs.BoolVar(&opts.JSONL, "jsonl", false, "legacy alias for -format jsonl")
+	fs.StringVar(&opts.OutputFormat, "format", "text", "text, json, jsonl, csv, md, or urls")
 	fs.StringVar(&opts.Output, "o", "", "write output to a file")
 	fs.Var(&opts.Headers, "H", "custom header, repeatable: 'Name: value'")
 	fs.StringVar(&opts.User, "user", "", "basic auth username")
@@ -109,31 +150,58 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.Verbose, "v", false, "show each rule check")
 	fs.BoolVar(&opts.Evidence, "evidence", false, "show evidence and remediation")
 	fs.BoolVar(&opts.Discover, "discover", false, "parse robots/sitemap and probe discovered paths")
-	fs.StringVar(&opts.Wordlist, "wordlist", "", "optional path wordlist for content discovery")
+	fs.StringVar(&opts.Wordlist, "wordlist", "", "path wordlist for content discovery")
+	fs.StringVar(&opts.SecList, "seclist", "", "SecLists alias; run 'hawkprobe wordlists'")
 	fs.StringVar(&opts.Extensions, "ext", "", "comma-separated extensions for wordlist entries")
+	fs.IntVar(&opts.WordlistLimit, "wordlist-limit", 50000, "maximum generated wordlist checks")
+	fs.BoolVar(&opts.Progress, "progress", true, "show progress bar for single-target scans")
+	fs.BoolVar(&noProgress, "no-progress", false, "disable progress bar")
+	fs.BoolVar(&opts.Quiet, "q", false, "quiet output; print findings only")
+	fs.StringVar(&opts.MinSeverity, "severity", "", "minimum rule severity: info, low, medium, high, critical")
+	fs.StringVar(&opts.IncludeCategory, "include-category", "", "comma-separated rule categories to include")
+	fs.StringVar(&opts.ExcludeCategory, "exclude-category", "", "comma-separated rule categories to exclude")
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
 	if profileAlias != "" {
 		opts.Mode = profileAlias
 	}
+	if noProgress || opts.Quiet {
+		opts.Progress = false
+	}
 	if fs.NArg() > 1 {
-		return opts, errors.New("only one positional target is allowed; use -list for more")
+		return opts, errors.New("only one positional target is allowed; use -list or -input for more")
 	}
 	if fs.NArg() == 1 {
 		opts.Target = fs.Arg(0)
 	}
-	if opts.Target == "" && opts.ListFile == "" {
-		return opts, errors.New("one target or -list file is required")
+	if opts.NmapFile != "" {
+		if opts.InputFile != "" {
+			return opts, errors.New("use either -nmap or -input, not both")
+		}
+		opts.InputFile = opts.NmapFile
+		if opts.InputFormat == "" || opts.InputFormat == "auto" {
+			opts.InputFormat = "nmap"
+		}
 	}
-	if opts.Target != "" && opts.ListFile != "" {
-		return opts, errors.New("use either a target or -list, not both")
+	sources := 0
+	for _, set := range []bool{opts.Target != "", opts.ListFile != "", opts.InputFile != ""} {
+		if set { sources++ }
+	}
+	if sources != 1 {
+		return opts, errors.New("provide exactly one target source: URL, -list, -input, or -nmap")
+	}
+	if opts.Wordlist != "" && opts.SecList != "" {
+		return opts, errors.New("use either -wordlist or -seclist, not both")
 	}
 	if opts.Concurrency < 1 || opts.Concurrency > 512 {
 		return opts, errors.New("concurrency must be between 1 and 512")
 	}
 	if opts.TargetConcurrency < 1 || opts.TargetConcurrency > 64 {
 		return opts, errors.New("target-c must be between 1 and 64")
+	}
+	if opts.WordlistLimit < 1 || opts.WordlistLimit > 1000000 {
+		return opts, errors.New("wordlist-limit must be between 1 and 1000000")
 	}
 	if opts.Timeout < 500*time.Millisecond {
 		return opts, errors.New("timeout must be at least 500ms")
@@ -144,10 +212,25 @@ func parseFlags() (options, error) {
 	if opts.JSON && opts.JSONL {
 		return opts, errors.New("use either -json or -jsonl")
 	}
+	if opts.JSON { opts.OutputFormat = "json" }
+	if opts.JSONL { opts.OutputFormat = "jsonl" }
+	opts.OutputFormat = lower(opts.OutputFormat)
+	switch opts.OutputFormat {
+	case "text", "json", "jsonl", "csv", "md", "markdown", "urls":
+	default:
+		return opts, fmt.Errorf("unknown output format %q", opts.OutputFormat)
+	}
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
 	opts.Mode = lower(opts.Mode)
 	if !validModes[opts.Mode] {
 		return opts, fmt.Errorf("unknown mode %q", opts.Mode)
+	}
+	if opts.MinSeverity != "" {
+		switch lower(opts.MinSeverity) {
+		case "info", "low", "medium", "med", "high", "critical", "crit":
+		default:
+			return opts, fmt.Errorf("invalid severity %q", opts.MinSeverity)
+		}
 	}
 	if (opts.User == "") != (opts.Pass == "") {
 		return opts, errors.New("basic auth requires both -user and -pass")
@@ -159,7 +242,7 @@ func parseFlags() (options, error) {
 }
 
 func reorderArgs(args []string) []string {
-	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-c": true, "-target-c": true, "-timeout": true, "-o": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
+	valueFlags := map[string]bool{"-list": true, "-input": true, "-input-format": true, "-nmap": true, "-rules": true, "-mode": true, "-profile": true, "-c": true, "-target-c": true, "-timeout": true, "-format": true, "-o": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-seclist": true, "-ext": true, "-wordlist-limit": true, "-severity": true, "-include-category": true, "-exclude-category": true}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -186,10 +269,7 @@ func scanTargets(opts options, targets []string, rules []rule) []scanResult {
 	if workers < 1 {
 		return results
 	}
-	type job struct {
-		index  int
-		target string
-	}
+	type job struct { index int; target string }
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -201,26 +281,22 @@ func scanTargets(opts options, targets []string, rules []rule) []scanResult {
 			}
 		}()
 	}
-	for i, target := range targets {
-		jobs <- job{i, target}
-	}
+	for i, target := range targets { jobs <- job{i, target} }
 	close(jobs)
 	wg.Wait()
 	return results
 }
 
 func printHelp() {
-	fmt.Println(`hawkprobe - fast web exposure and misconfiguration scanner
+	fmt.Println(`HawkProbe - fast web exposure and misconfiguration scanner
 
-usage:
+USAGE
   hawkprobe [options] <url>
-  hawkprobe <url> [options]
   hawkprobe -list targets.txt [options]
-  hawkprobe rules list
-  hawkprobe rules validate custom-rules.json
-  hawkprobe version
+  hawkprobe -nmap scan.xml [options]
+  hawkprobe -input results.jsonl -input-format httpx-jsonl [options]
 
-modes:
+MODES
   quick       fast high-value checks
   default     balanced everyday scan
   full/deep   broad exposure and discovery scan
@@ -233,19 +309,35 @@ modes:
   tls         TLS/certificate checks
   tech        technology fingerprinting
 
-scan options:
+DISCOVERY
+  -wordlist file        use any text wordlist, including SecLists files
+  -seclist alias        use an installed SecLists alias
+  -ext php,txt,bak      expand extensionless wordlist entries
+  -wordlist-limit int   maximum generated checks (default 50000)
+  -discover             parse robots.txt/sitemaps and probe found paths
+
+TOOL INPUT
+  -nmap file            import Nmap XML or grepable output
+  -input file           import tool output; use '-' for stdin
+  -input-format string  auto, plain, nmap-xml, nmap-gnmap,
+                        httpx-jsonl, nuclei-jsonl, ferox-jsonl, ffuf-json
+
+SCAN CONTROL
   -mode string          scan mode (default "default")
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
   -timeout duration     request timeout (default 6s)
-  -discover             parse robots/sitemap and probe discovered paths
-  -wordlist file        discover extra paths from a wordlist
-  -ext php,txt,bak      add extensions to wordlist entries
-  -v                    show each rule check
-  -evidence             print evidence and remediation details
-  -rules file.json      add custom rules
-  -list targets.txt     scan targets from a file
-  -H "Name: value"      add a request header; repeatable
+  -severity string      minimum rule severity
+  -include-category x   only selected comma-separated categories
+  -exclude-category x   skip selected comma-separated categories
+  -v                    show every rule check
+  -progress             progress bar (default on for single target)
+  -no-progress          disable progress bar
+  -q                    findings-only output
+  -evidence             print evidence and remediation
+
+REQUESTS
+  -H "Name: value"      custom header; repeatable
   -host string          override HTTP Host header
   -user/-pass           basic authentication
   -token string         bearer token
@@ -255,17 +347,23 @@ scan options:
   -max-redirects int    redirect limit (default 5)
   -k                    allow invalid TLS certificates
 
-output:
-  -json                 JSON output
-  -jsonl                JSON Lines output
+OUTPUT
+  -format string        text, json, jsonl, csv, md, urls
   -o file               write output to a file
+  -json / -jsonl        compatibility aliases
 
-examples:
-  hawkprobe http://10.10.10.10 -mode htb -v
-  hawkprobe -mode full -c 64 https://example.com
-  hawkprobe https://example.com -mode exposure -evidence
-  hawkprobe -list targets.txt -target-c 8 -jsonl -o results.jsonl
-  hawkprobe -host internal.htb http://10.10.10.10 -mode htb
-  hawkprobe http://box.htb -mode htb -wordlist paths.txt -ext php,bak
-  hawkprobe rules validate custom-rules.json`)
+UTILITIES
+  hawkprobe rules list
+  hawkprobe rules stats
+  hawkprobe rules validate custom-rules.json
+  hawkprobe wordlists
+  hawkprobe version
+
+EXAMPLES
+  hawkprobe http://10.10.10.10 -mode htb
+  hawkprobe box.htb -mode htb -seclist raft-small -ext php,bak
+  hawkprobe -nmap scan.xml -mode htb -target-c 8
+  httpx -json | hawkprobe -input - -input-format httpx-jsonl -mode exposure
+  hawkprobe example.com -mode full -severity medium -evidence
+  hawkprobe -list targets.txt -format jsonl -o results.jsonl`)
 }
