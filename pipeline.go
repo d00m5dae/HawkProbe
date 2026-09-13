@@ -87,7 +87,7 @@ func filterFindingsForOptions(findings []finding, opts options) []finding {
 		if opts.MinSeverity != "" && f.Severity < minimum {
 			continue
 		}
-		if opts.Category != "" && f.Category != "" && !strings.EqualFold(f.Category, opts.Category) {
+		if opts.Category != "" && !strings.EqualFold(f.Category, opts.Category) {
 			continue
 		}
 		out = append(out, f)
