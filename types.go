@@ -53,6 +53,8 @@ type rule struct {
 type options struct {
 	Target            string
 	ListFile          string
+	NmapFile          string
+	ReadStdin         bool
 	RuleFile          string
 	Mode              string
 	Concurrency       int
@@ -61,6 +63,7 @@ type options struct {
 	Insecure          bool
 	JSON              bool
 	JSONL             bool
+	CSV               bool
 	Output            string
 	Headers           headerList
 	User              string
@@ -75,7 +78,19 @@ type options struct {
 	Evidence          bool
 	Discover          bool
 	Wordlist          string
+	SecLists          string
+	SecListsRoot      string
 	Extensions        string
+	Progress          bool
+	Rate              int
+	MinSeverity       string
+	Category          string
+	IncludeTag        string
+	ExcludeTag        string
+	FailOn            string
+
+	progress *progressTracker
+	rateGate <-chan time.Time
 }
 
 type scanResult struct {
