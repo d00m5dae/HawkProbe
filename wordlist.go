@@ -7,7 +7,11 @@ import (
 	"strings"
 )
 
-func loadWordlistRules(path, extensions string, limit int) ([]rule, error) {
+func loadWordlistRules(path, extensions string) ([]rule, error) {
+	return loadWordlistRulesLimit(path, extensions, 50000)
+}
+
+func loadWordlistRulesLimit(path, extensions string, limit int) ([]rule, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
