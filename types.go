@@ -64,6 +64,7 @@ type options struct {
 	JSON              bool
 	JSONL             bool
 	CSV               bool
+	SARIF             bool
 	Output            string
 	Headers           headerList
 	User              string
