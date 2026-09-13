@@ -83,6 +83,11 @@ func readTargetSource(path string) ([]string, error) {
 			return out, nil
 		}
 	}
+	if bytes.Contains(trimmed, []byte("Nmap scan report for ")) {
+		if out := parseNmapNormal(string(trimmed)); len(out) > 0 {
+			return out, nil
+		}
+	}
 	if bytes.HasPrefix(trimmed, []byte("{")) {
 		if out := parseHTTPXJSONL(trimmed); len(out) > 0 {
 			return out, nil
@@ -112,7 +117,7 @@ func parseNmapXML(data []byte) ([]string, error) {
 			scheme := nmapScheme(port)
 			hostport := net.JoinHostPort(name, strconv.Itoa(port.PortID))
 			if (scheme == "http" && port.PortID == 80) || (scheme == "https" && port.PortID == 443) {
-				hostport = name
+				hostport = defaultPortHost(name)
 			}
 			out = append(out, scheme+"://"+hostport)
 		}
@@ -142,25 +147,15 @@ func looksLikeWebService(p nmapPort) bool {
 	if strings.Contains(name, "http") || name == "ssl" {
 		return true
 	}
-	switch p.PortID {
-	case 80, 81, 443, 3000, 4000, 5000, 5601, 7001, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090, 9443:
-		return true
-	default:
-		return false
-	}
+	return isCommonWebPort(p.PortID)
 }
 
 func nmapScheme(p nmapPort) string {
 	name := strings.ToLower(p.Service.Name)
-	if strings.EqualFold(p.Service.Tunnel, "ssl") || strings.Contains(name, "https") || strings.Contains(name, "ssl") {
+	if strings.EqualFold(p.Service.Tunnel, "ssl") || strings.Contains(name, "https") || strings.Contains(name, "ssl") || isLikelyTLSPort(p.PortID) {
 		return "https"
 	}
-	switch p.PortID {
-	case 443, 8443, 9443:
-		return "https"
-	default:
-		return "http"
-	}
+	return "http"
 }
 
 func parseNmapGrepable(text string) []string {
@@ -194,21 +189,78 @@ func parseNmapGrepable(text string) []string {
 				continue
 			}
 			service := strings.ToLower(strings.Join(fields[4:], "/"))
-			if !strings.Contains(service, "http") && !isCommonWebPort(port) {
-				continue
+			if target, ok := nmapTextTarget(host, port, service); ok {
+				out = append(out, target)
 			}
-			scheme := "http"
-			if strings.Contains(service, "ssl") || strings.Contains(service, "https") || port == 443 || port == 8443 || port == 9443 {
-				scheme = "https"
-			}
-			hostport := net.JoinHostPort(host, strconv.Itoa(port))
-			if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
-				hostport = host
-			}
-			out = append(out, scheme+"://"+hostport)
 		}
 	}
 	return dedupeStrings(out)
+}
+
+func parseNmapNormal(text string) []string {
+	var out []string
+	var host string
+	s := bufio.NewScanner(strings.NewReader(text))
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if strings.HasPrefix(line, "Nmap scan report for ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "Nmap scan report for "))
+			host = nmapReportHost(rest)
+			continue
+		}
+		if host == "" || !strings.Contains(line, "/tcp") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[1] != "open" {
+			continue
+		}
+		port, err := strconv.Atoi(strings.TrimSuffix(fields[0], "/tcp"))
+		if err != nil {
+			continue
+		}
+		if target, ok := nmapTextTarget(host, port, fields[2]); ok {
+			out = append(out, target)
+		}
+	}
+	return dedupeStrings(out)
+}
+
+func nmapReportHost(rest string) string {
+	if open := strings.LastIndex(rest, "("); open >= 0 && strings.HasSuffix(rest, ")") {
+		candidate := strings.TrimSpace(strings.TrimSuffix(rest[open+1:], ")"))
+		if candidate != "" {
+			return candidate
+		}
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func nmapTextTarget(host string, port int, service string) (string, bool) {
+	service = strings.ToLower(strings.TrimSpace(service))
+	if !strings.Contains(service, "http") && !strings.Contains(service, "ssl") && !isCommonWebPort(port) {
+		return "", false
+	}
+	scheme := "http"
+	if strings.Contains(service, "https") || strings.Contains(service, "ssl") || isLikelyTLSPort(port) {
+		scheme = "https"
+	}
+	hostport := net.JoinHostPort(host, strconv.Itoa(port))
+	if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
+		hostport = defaultPortHost(host)
+	}
+	return scheme + "://" + hostport, true
+}
+
+func defaultPortHost(host string) string {
+	if strings.Contains(host, ":") && net.ParseIP(host) != nil {
+		return "[" + host + "]"
+	}
+	return host
 }
 
 func parseHTTPXJSONL(data []byte) []string {
