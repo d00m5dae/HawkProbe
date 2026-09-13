@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0 (development)
+
+- Added 500+ additional grouped detection paths across secrets, backups, DevOps, debug, admin, API, CMS, cloud, and discovery categories
+- Added Nmap XML and grepable-output import with HTTP/HTTPS service extraction
+- Added generic tool input with auto-detection and support for httpx JSONL, nuclei JSONL, feroxbuster JSONL, ffuf JSON, plain URL lists, and stdin
+- Added first-class SecLists aliases, common-path auto-discovery, and `SECLISTS_PATH`
+- Added configurable wordlist limits up to 1,000,000 generated checks
+- Added a single-target terminal progress bar and `-no-progress`
+- Added quiet findings-only output
+- Added minimum-severity and include/exclude category filters
+- Added page title, final URL, server, content type, and response-size metadata
+- Added CSV, Markdown, and URL-only output formats alongside text, JSON, and JSONL
+- Added `hawkprobe rules stats` and `hawkprobe wordlists`
+- Added contributor, security, integration, issue-template, and pull-request documentation
+- Added importer and expanded-rule regression tests
+
 ## 1.2.0 (development)
 
 - Added scan modes: `quick`, `default`, `full`, `deep`, `htb`, `exposure`, `admin`, `api`, `debug`, `headers`, `tls`, and `tech`
