@@ -110,7 +110,7 @@ func newClient(opts options) (*http.Client, error) {
 		transport.Proxy = http.ProxyURL(u)
 	}
 	return &http.Client{
-		Transport: transport,
+		Transport: wrapRateLimit(transport, opts.Rate),
 		Timeout:   opts.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if opts.NoRedirect {
