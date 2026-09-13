@@ -43,6 +43,7 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 	if err != nil {
 		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Requests: int(requests), Error: cleanError(err)}
 	}
+	meta := inspectResponseMeta(baseResp, body)
 
 	var findings []finding
 	if opts.Mode != "tech" {
@@ -77,14 +78,19 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 	findings = dedupeFindings(findings)
 	sortFindings(findings)
 	return scanResult{
-		Target:       target,
-		Status:       baseResp.Status,
-		DurationMS:   time.Since(start).Milliseconds(),
-		Requests:     int(requests),
-		RulesChecked: stats.Checked,
-		NoMatch:      stats.NoMatch,
-		Skipped:      stats.Skipped,
-		Findings:     findings,
+		Target:        target,
+		Status:        baseResp.Status,
+		Title:         meta.Title,
+		FinalURL:      meta.FinalURL,
+		ContentType:   meta.ContentType,
+		ContentLength: meta.ContentLength,
+		Server:        meta.Server,
+		DurationMS:    time.Since(start).Milliseconds(),
+		Requests:      int(requests),
+		RulesChecked:  stats.Checked,
+		NoMatch:       stats.NoMatch,
+		Skipped:       stats.Skipped,
+		Findings:      findings,
 	}
 }
 
@@ -182,6 +188,7 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	jobs := make(chan rule)
 	results := make(chan result, workers*2)
 	var wg sync.WaitGroup
+	progress := newProgressBar(opts, target, len(rules))
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -240,6 +247,7 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	stats := ruleStats{}
 	for r := range results {
 		stats.Checked++
+		progress.Advance()
 		if r.skipped {
 			stats.Skipped++
 			continue
@@ -250,6 +258,7 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 		}
 		out = append(out, *r.finding)
 	}
+	progress.Stop()
 	return out, stats
 }
 
@@ -283,7 +292,7 @@ func ruleMatches(r rule, resp *http.Response, body []byte, base baseline) bool {
 }
 
 func verboseCheck(opts options, path string, status int, state string) {
-	if !opts.Verbose {
+	if !opts.Verbose || opts.Quiet {
 		return
 	}
 	verboseMu.Lock()
@@ -304,16 +313,12 @@ func cleanError(err error) string {
 }
 
 func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
+	if a > b { return a }
 	return b
 }
 
 func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
+	if a < b { return a }
 	return b
 }
 
