@@ -2,70 +2,105 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type baseline struct {
-	status int
-	length int64
-}
+var verboseMu sync.Mutex
 
 func scanTarget(opts options, target string, rules []rule) scanResult {
 	start := time.Now()
 	var requests int64
+	if opts.Mode == "tls" {
+		findings := inspectTLS(target, opts.Insecure, opts.Timeout)
+		sortFindings(findings)
+		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Findings: findings}
+	}
+
 	client, err := newClient(opts)
 	if err != nil {
 		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout*time.Duration(len(rules)+6))
+
+	budget := opts.Timeout * time.Duration(maxInt(8, (len(rules)/maxInt(1, opts.Concurrency))+8))
+	if budget < 30*time.Second {
+		budget = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
-	base, body, err := fetchBody(ctx, client, opts, target, 256*1024, &requests)
+	baseResp, body, err := fetchBody(ctx, client, opts, http.MethodGet, target, nil, 512*1024, &requests)
 	if err != nil {
 		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Requests: int(requests), Error: cleanError(err)}
 	}
 
-	findings := inspectBase(target, base, body)
-	findings = append(findings, fingerprint(target, base, body)...)
-	bl := getBaseline(ctx, client, opts, target, &requests)
-	findings = append(findings, scanRules(ctx, client, opts, target, rules, bl, &requests)...)
-	findings = append(findings, inspectTLS(target, opts.Insecure, opts.Timeout)...)
-	sortFindings(findings)
+	var findings []finding
+	if opts.Mode != "tech" {
+		findings = inspectBase(target, baseResp, body)
+	}
+	if opts.Mode == "htb" || opts.Mode == "full" || opts.Mode == "deep" || opts.Mode == "exposure" {
+		findings = append(findings, inspectContent(target, body)...)
+	}
+	if opts.Mode != "headers" {
+		findings = append(findings, fingerprint(target, baseResp, body)...)
+	}
 
+	needBaseline := len(rules) > 0 || opts.Discover || opts.Mode == "htb" || opts.Mode == "full" || opts.Mode == "deep"
+	bl := baseline{}
+	if needBaseline {
+		bl = getBaseline(ctx, client, opts, target, &requests)
+	}
+	ruleFindings, stats := scanRules(ctx, client, opts, target, rules, bl, &requests)
+	findings = append(findings, ruleFindings...)
+
+	if modeRunsHTTPProbes(opts.Mode) {
+		findings = append(findings, inspectMethods(ctx, client, opts, target, &requests)...)
+		findings = append(findings, inspectCORS(ctx, client, opts, target, &requests)...)
+	}
+	if opts.Discover || opts.Mode == "htb" || opts.Mode == "full" || opts.Mode == "deep" {
+		findings = append(findings, discoverInterestingPaths(ctx, client, opts, target, bl, &requests)...)
+	}
+	if opts.Mode != "tech" {
+		findings = append(findings, inspectTLS(target, opts.Insecure, opts.Timeout)...)
+	}
+
+	findings = dedupeFindings(findings)
+	sortFindings(findings)
 	return scanResult{
-		Target:     target,
-		Status:     base.Status,
-		DurationMS: time.Since(start).Milliseconds(),
-		Requests:   int(requests),
-		Findings:   findings,
+		Target:       target,
+		Status:       baseResp.Status,
+		DurationMS:   time.Since(start).Milliseconds(),
+		Requests:     int(requests),
+		RulesChecked: stats.Checked,
+		NoMatch:      stats.NoMatch,
+		Skipped:      stats.Skipped,
+		Findings:     findings,
 	}
 }
 
 func newClient(opts options) (*http.Client, error) {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		MaxIdleConns:          opts.Concurrency * 2,
-		MaxIdleConnsPerHost:   opts.Concurrency,
-		IdleConnTimeout:       30 * time.Second,
+		MaxIdleConns:          maxInt(64, opts.Concurrency*4),
+		MaxIdleConnsPerHost:   maxInt(32, opts.Concurrency*2),
+		MaxConnsPerHost:       maxInt(32, opts.Concurrency*2),
+		IdleConnTimeout:       60 * time.Second,
 		TLSHandshakeTimeout:   opts.Timeout,
 		ResponseHeaderTimeout: opts.Timeout,
-		DialContext: (&net.Dialer{
-			Timeout:   opts.Timeout,
-			KeepAlive: 20 * time.Second,
-		}).DialContext,
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: opts.Insecure},
+		ExpectContinueTimeout: time.Second,
+		ForceAttemptHTTP2:     true,
+		DialContext:           (&net.Dialer{Timeout: opts.Timeout, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: opts.Insecure, MinVersion: tls.VersionTLS10},
 	}
 	if opts.Proxy != "" {
 		u, err := url.Parse(opts.Proxy)
@@ -89,8 +124,8 @@ func newClient(opts options) (*http.Client, error) {
 	}, nil
 }
 
-func makeRequest(ctx context.Context, client *http.Client, opts options, target string, requests *int64) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+func makeRequest(ctx context.Context, client *http.Client, opts options, method, target string, extra http.Header, requests *int64) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +139,14 @@ func makeRequest(ctx context.Context, client *http.Client, opts options, target 
 		parts := strings.SplitN(raw, ":", 2)
 		req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
+	for k, values := range extra {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
+	}
+	if opts.HostHeader != "" {
+		req.Host = opts.HostHeader
+	}
 	if opts.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+opts.Token)
 	} else if opts.User != "" || opts.Pass != "" {
@@ -113,8 +156,8 @@ func makeRequest(ctx context.Context, client *http.Client, opts options, target 
 	return client.Do(req)
 }
 
-func fetchBody(ctx context.Context, client *http.Client, opts options, target string, limit int64, requests *int64) (*http.Response, []byte, error) {
-	resp, err := makeRequest(ctx, client, opts, target, requests)
+func fetchBody(ctx context.Context, client *http.Client, opts options, method, target string, extra http.Header, limit int64, requests *int64) (*http.Response, []byte, error) {
+	resp, err := makeRequest(ctx, client, opts, method, target, extra, requests)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,29 +169,18 @@ func fetchBody(ctx context.Context, client *http.Client, opts options, target st
 	return resp, body, nil
 }
 
-func getBaseline(ctx context.Context, client *http.Client, opts options, target string, requests *int64) baseline {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return baseline{}
-	}
-	path := "/.hawkprobe-" + hex.EncodeToString(buf)
-	resp, body, err := fetchBody(ctx, client, opts, target+path, 64*1024, requests)
-	if err != nil {
-		return baseline{}
-	}
-	return baseline{status: resp.StatusCode, length: int64(len(body))}
-}
-
-func scanRules(ctx context.Context, client *http.Client, opts options, target string, rules []rule, base baseline, requests *int64) []finding {
-	workers := opts.Concurrency
-	if workers > len(rules) {
-		workers = len(rules)
-	}
+func scanRules(ctx context.Context, client *http.Client, opts options, target string, rules []rule, base baseline, requests *int64) ([]finding, ruleStats) {
+	workers := minInt(opts.Concurrency, len(rules))
 	if workers < 1 {
-		return nil
+		return nil, ruleStats{}
+	}
+	type result struct {
+		finding *finding
+		matched bool
+		skipped bool
 	}
 	jobs := make(chan rule)
-	results := make(chan finding, len(rules))
+	results := make(chan result, workers*2)
 	var wg sync.WaitGroup
 
 	for i := 0; i < workers; i++ {
@@ -156,44 +188,69 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 		go func() {
 			defer wg.Done()
 			for r := range jobs {
-				u := target + r.Path
-				resp, body, err := fetchBody(ctx, client, opts, u, 256*1024, requests)
-				if err != nil || !statusAllowed(resp.StatusCode, r.Statuses) {
+				u := joinURL(target, r.Path)
+				resp, body, err := fetchBody(ctx, client, opts, r.Method, u, nil, 384*1024, requests)
+				if err != nil {
+					verboseCheck(opts, r.Path, 0, "error")
+					results <- result{skipped: true}
+					continue
+				}
+				if statusAllowed(resp.StatusCode, r.ExcludeStatuses) || !statusAllowed(resp.StatusCode, r.Statuses) {
+					verboseCheck(opts, r.Path, resp.StatusCode, "no-match")
+					results <- result{}
 					continue
 				}
 				if !ruleMatches(r, resp, body, base) {
+					verboseCheck(opts, r.Path, resp.StatusCode, "no-match")
+					results <- result{}
 					continue
 				}
-				msg := r.Name
+				sev := parseSeverity(r.Severity)
+				message := r.Name
 				if resp.StatusCode != http.StatusOK {
-					msg += fmt.Sprintf(" (%d)", resp.StatusCode)
+					message += fmt.Sprintf(" (%d)", resp.StatusCode)
 				}
-				results <- finding{Severity: parseSeverity(r.Severity), Level: parseSeverity(r.Severity).String(), Rule: r.ID, Message: msg, URL: u}
+				evidence := r.Evidence
+				if evidence == "" {
+					evidence = evidenceForResponse(resp, body)
+				}
+				f := finding{Severity: sev, Level: sev.String(), Rule: r.ID, Category: r.Category, Confidence: r.Confidence, Message: message, URL: u, Evidence: evidence, Remediation: r.Remediation}
+				verboseCheck(opts, r.Path, resp.StatusCode, "FOUND")
+				results <- result{finding: &f, matched: true}
 			}
 		}()
 	}
 
 	go func() {
+		defer close(results)
 		for _, r := range rules {
 			select {
 			case jobs <- r:
 			case <-ctx.Done():
 				close(jobs)
 				wg.Wait()
-				close(results)
 				return
 			}
 		}
 		close(jobs)
 		wg.Wait()
-		close(results)
 	}()
 
 	var out []finding
-	for f := range results {
-		out = append(out, f)
+	stats := ruleStats{}
+	for r := range results {
+		stats.Checked++
+		if r.skipped {
+			stats.Skipped++
+			continue
+		}
+		if !r.matched {
+			stats.NoMatch++
+			continue
+		}
+		out = append(out, *r.finding)
 	}
-	return out
+	return out, stats
 }
 
 func ruleMatches(r rule, resp *http.Response, body []byte, base baseline) bool {
@@ -202,6 +259,12 @@ func ruleMatches(r rule, resp *http.Response, body []byte, base baseline) bool {
 		return false
 	}
 	if len(r.NotContains) > 0 && !containsNone(text, r.NotContains) {
+		return false
+	}
+	if r.compiledRegex != nil && !r.compiledRegex.Match(body) {
+		return false
+	}
+	if r.ContentType != "" && !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), strings.ToLower(r.ContentType)) {
 		return false
 	}
 	for name, expected := range r.Headers {
@@ -213,164 +276,23 @@ func ruleMatches(r rule, resp *http.Response, body []byte, base baseline) bool {
 			return false
 		}
 	}
-	if len(r.Contains) == 0 && len(r.Headers) == 0 && looksLikeBaseline(resp.StatusCode, int64(len(body)), base) {
+	if len(r.Contains) == 0 && len(r.Headers) == 0 && r.compiledRegex == nil && looksLikeBaseline(resp.StatusCode, body, base) {
 		return false
 	}
 	return true
 }
 
-func looksLikeBaseline(status int, length int64, base baseline) bool {
-	if base.status == 0 || status != base.status {
-		return false
+func verboseCheck(opts options, path string, status int, state string) {
+	if !opts.Verbose {
+		return
 	}
-	if base.length == 0 {
-		return length == 0
+	verboseMu.Lock()
+	defer verboseMu.Unlock()
+	if status > 0 {
+		fmt.Fprintf(os.Stderr, "[check] %-40s %3d %s\n", path, status, state)
+	} else {
+		fmt.Fprintf(os.Stderr, "[check] %-40s --- %s\n", path, state)
 	}
-	delta := length - base.length
-	if delta < 0 {
-		delta = -delta
-	}
-	return delta <= 48
-}
-
-func inspectBase(target string, resp *http.Response, body []byte) []finding {
-	var out []finding
-	h := resp.Header
-	u, _ := url.Parse(target)
-
-	if u != nil && u.Scheme == "https" && h.Get("Strict-Transport-Security") == "" {
-		out = append(out, newFinding(low, "missing-hsts", "HSTS header is missing", target))
-	}
-	if h.Get("Content-Security-Policy") == "" {
-		out = append(out, newFinding(low, "missing-csp", "Content-Security-Policy header is missing", target))
-	}
-	if h.Get("X-Content-Type-Options") == "" {
-		out = append(out, newFinding(low, "missing-nosniff", "X-Content-Type-Options header is missing", target))
-	}
-	if h.Get("Referrer-Policy") == "" {
-		out = append(out, newFinding(low, "missing-referrer-policy", "Referrer-Policy header is missing", target))
-	}
-	if h.Get("X-Frame-Options") == "" && !strings.Contains(strings.ToLower(h.Get("Content-Security-Policy")), "frame-ancestors") {
-		out = append(out, newFinding(low, "missing-frame-protection", "frame protection is missing", target))
-	}
-	if h.Get("Permissions-Policy") == "" {
-		out = append(out, newFinding(info, "missing-permissions-policy", "Permissions-Policy header is missing", target))
-	}
-	if server := h.Get("Server"); server != "" {
-		out = append(out, newFinding(info, "server-header", "server header: "+server, target))
-	}
-	if powered := h.Get("X-Powered-By"); powered != "" {
-		out = append(out, newFinding(info, "powered-by", "X-Powered-By header: "+powered, target))
-	}
-	if strings.EqualFold(h.Get("Access-Control-Allow-Origin"), "*") && strings.EqualFold(h.Get("Access-Control-Allow-Credentials"), "true") {
-		out = append(out, newFinding(medium, "cors-wildcard-credentials", "CORS allows wildcard origin with credentials", target))
-	}
-	for _, raw := range h.Values("Set-Cookie") {
-		cookie := strings.ToLower(raw)
-		name := strings.SplitN(raw, "=", 2)[0]
-		if !strings.Contains(cookie, "httponly") {
-			out = append(out, newFinding(low, "cookie-httponly", "cookie "+name+" is missing HttpOnly", target))
-		}
-		if u != nil && u.Scheme == "https" && !strings.Contains(cookie, "secure") {
-			out = append(out, newFinding(low, "cookie-secure", "cookie "+name+" is missing Secure", target))
-		}
-		if !strings.Contains(cookie, "samesite") {
-			out = append(out, newFinding(info, "cookie-samesite", "cookie "+name+" is missing SameSite", target))
-		}
-	}
-	text := strings.ToLower(string(body))
-	if strings.Contains(text, "index of /") && strings.Contains(text, "parent directory") {
-		out = append(out, newFinding(medium, "directory-listing", "directory listing appears enabled", target))
-	}
-	return out
-}
-
-func fingerprint(target string, resp *http.Response, body []byte) []finding {
-	var out []finding
-	server := strings.ToLower(resp.Header.Get("Server"))
-	powered := strings.ToLower(resp.Header.Get("X-Powered-By"))
-	text := strings.ToLower(string(body))
-	seen := make(map[string]bool)
-	add := func(id, name string) {
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, newFinding(info, id, "technology: "+name, target))
-		}
-	}
-	if strings.Contains(server, "nginx") {
-		add("tech-nginx", "nginx")
-	}
-	if strings.Contains(server, "apache") {
-		add("tech-apache", "Apache")
-	}
-	if strings.Contains(server, "microsoft-iis") {
-		add("tech-iis", "Microsoft IIS")
-	}
-	if strings.Contains(server, "cloudflare") || resp.Header.Get("CF-Ray") != "" {
-		add("tech-cloudflare", "Cloudflare")
-	}
-	if strings.Contains(powered, "php") {
-		add("tech-php", "PHP")
-	}
-	if strings.Contains(powered, "asp.net") {
-		add("tech-aspnet", "ASP.NET")
-	}
-	if strings.Contains(text, "wp-content/") || strings.Contains(text, "wp-includes/") {
-		add("tech-wordpress", "WordPress")
-	}
-	if strings.Contains(text, "grafana") && strings.Contains(text, "public/build") {
-		add("tech-grafana", "Grafana")
-	}
-	if strings.Contains(text, "jenkins") && strings.Contains(text, "adjuncts") {
-		add("tech-jenkins", "Jenkins")
-	}
-	return out
-}
-
-func inspectTLS(target string, insecure bool, timeout time.Duration) []finding {
-	u, err := url.Parse(target)
-	if err != nil || u.Scheme != "https" {
-		return nil
-	}
-	host := u.Hostname()
-	port := u.Port()
-	if port == "" {
-		port = "443"
-	}
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, port), &tls.Config{ServerName: host, InsecureSkipVerify: insecure})
-	if err != nil {
-		if insecure {
-			return []finding{newFinding(medium, "tls-handshake", "TLS handshake failed: "+cleanError(err), target)}
-		}
-		return []finding{newFinding(high, "tls-validation", "TLS certificate validation failed: "+cleanError(err), target)}
-	}
-	defer conn.Close()
-	state := conn.ConnectionState()
-	var out []finding
-	if state.Version == tls.VersionTLS10 || state.Version == tls.VersionTLS11 {
-		out = append(out, newFinding(high, "legacy-tls", "legacy TLS version negotiated", target))
-	}
-	if len(state.PeerCertificates) == 0 {
-		return out
-	}
-	cert := state.PeerCertificates[0]
-	remaining := time.Until(cert.NotAfter)
-	if remaining < 0 {
-		out = append(out, newFinding(high, "tls-expired", "TLS certificate is expired", target))
-	} else if remaining < 30*24*time.Hour {
-		out = append(out, newFinding(medium, "tls-expiring", fmt.Sprintf("TLS certificate expires in %d days", int(remaining.Hours()/24)), target))
-	}
-	if insecure {
-		if err := cert.VerifyHostname(host); err != nil {
-			out = append(out, newFinding(medium, "tls-hostname", "TLS certificate hostname mismatch", target))
-		}
-	}
-	return out
-}
-
-func newFinding(s severity, id, message, target string) finding {
-	return finding{Severity: s, Level: s.String(), Rule: id, Message: message, URL: target}
 }
 
 func cleanError(err error) string {
@@ -380,3 +302,19 @@ func cleanError(err error) string {
 	}
 	return msg
 }
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func modeRunsHTTPProbes(mode string) bool { return mode != "tls" && mode != "tech" }
