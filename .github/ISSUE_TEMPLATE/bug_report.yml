@@ -1,0 +1,58 @@
+name: Bug report
+description: Report reproducible incorrect behavior in HawkProbe
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include target credentials, tokens, cookies, private keys, or sensitive scan output.
+  - type: input
+    id: version
+    attributes:
+      label: HawkProbe version
+      placeholder: hawkprobe version
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS / architecture
+      placeholder: Linux amd64
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command / configuration
+      description: Redact secrets and private target details.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Prefer a local/httptest-style reproduction over a public target when possible.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed credentials, tokens, cookies, private keys, and sensitive target data.
+          required: true
+        - label: I checked for an existing issue describing the same problem.
+          required: true
