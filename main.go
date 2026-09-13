@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var version = "1.2.0-dev"
+var version = "1.3.0-dev"
 
 func main() {
 	if handleCommand(os.Args[1:]) {
@@ -58,6 +58,21 @@ func handleCommand(args []string) bool {
 	case "version", "-version", "--version":
 		fmt.Printf("hawkprobe %s\n", version)
 		return true
+	case "doctor":
+		printDoctor()
+		return true
+	case "wordlists":
+		root := findSecListsRoot()
+		if root == "" {
+			fmt.Println("SecLists: not found (set SECLISTS_PATH or install SecLists)")
+		} else {
+			fmt.Println("SecLists:", root)
+		}
+		fmt.Println("presets:")
+		for _, name := range secListsPresetNames() {
+			fmt.Printf("  @%-13s %s\n", name, secListsPresets[name])
+		}
+		return true
 	case "rules":
 		if len(args) >= 3 && args[1] == "validate" {
 			if err := validateRulesFile(args[2]); err != nil {
@@ -69,7 +84,7 @@ func handleCommand(args []string) bool {
 		}
 		if len(args) >= 2 && args[1] == "list" {
 			for _, r := range builtinRules {
-				fmt.Printf("%-28s %-10s %-8s %s\n", r.ID, r.Category, r.Severity, r.Path)
+				fmt.Printf("%-32s %-12s %-8s %s\n", r.ID, r.Category, r.Severity, r.Path)
 			}
 			return true
 		}
@@ -86,7 +101,7 @@ func parseFlags() (options, error) {
 	fs := flag.NewFlagSet("hawkprobe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var profileAlias string
-	fs.StringVar(&opts.ListFile, "list", "", "file containing targets")
+	fs.StringVar(&opts.ListFile, "list", "", "target file, stdin (-), Nmap XML/gnmap, or httpx JSONL")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
 	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
@@ -109,8 +124,11 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.Verbose, "v", false, "show each rule check")
 	fs.BoolVar(&opts.Evidence, "evidence", false, "show evidence and remediation")
 	fs.BoolVar(&opts.Discover, "discover", false, "parse robots/sitemap and probe discovered paths")
-	fs.StringVar(&opts.Wordlist, "wordlist", "", "optional path wordlist for content discovery")
+	fs.StringVar(&opts.Wordlist, "wordlist", "", "wordlist path or SecLists preset such as @common")
 	fs.StringVar(&opts.Extensions, "ext", "", "comma-separated extensions for wordlist entries")
+	fs.BoolVar(&opts.NoProgress, "no-progress", false, "disable terminal progress bar")
+	fs.BoolVar(&opts.NoColor, "no-color", false, "disable ANSI colors")
+	fs.BoolVar(&opts.Quiet, "q", false, "only print findings and errors")
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
@@ -124,7 +142,7 @@ func parseFlags() (options, error) {
 		opts.Target = fs.Arg(0)
 	}
 	if opts.Target == "" && opts.ListFile == "" {
-		return opts, errors.New("one target or -list file is required")
+		return opts, errors.New("one target or -list input is required")
 	}
 	if opts.Target != "" && opts.ListFile != "" {
 		return opts, errors.New("use either a target or -list, not both")
@@ -216,8 +234,12 @@ usage:
   hawkprobe [options] <url>
   hawkprobe <url> [options]
   hawkprobe -list targets.txt [options]
+  hawkprobe -list nmap.xml -mode htb
+  nmap ... -oG - | hawkprobe -list - -mode htb
   hawkprobe rules list
   hawkprobe rules validate custom-rules.json
+  hawkprobe wordlists
+  hawkprobe doctor
   hawkprobe version
 
 modes:
@@ -233,19 +255,23 @@ modes:
   tls         TLS/certificate checks
   tech        technology fingerprinting
 
+input:
+  -list file           plain URLs/hosts, Nmap XML, Nmap -oG, or httpx JSONL
+  -list -              read targets from stdin
+  -wordlist file       path discovery wordlist
+  -wordlist @common    auto-find a SecLists preset
+  -ext php,txt,bak     add extensions to extensionless wordlist entries
+
 scan options:
   -mode string          scan mode (default "default")
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
   -timeout duration     request timeout (default 6s)
   -discover             parse robots/sitemap and probe discovered paths
-  -wordlist file        discover extra paths from a wordlist
-  -ext php,txt,bak      add extensions to wordlist entries
-  -v                    show each rule check
-  -evidence             print evidence and remediation details
+  -v                    show every rule check
+  -evidence             show evidence and remediation
   -rules file.json      add custom rules
-  -list targets.txt     scan targets from a file
-  -H "Name: value"      add a request header; repeatable
+  -H "Name: value"      custom request header; repeatable
   -host string          override HTTP Host header
   -user/-pass           basic authentication
   -token string         bearer token
@@ -255,17 +281,21 @@ scan options:
   -max-redirects int    redirect limit (default 5)
   -k                    allow invalid TLS certificates
 
-output:
+terminal/output:
+  -q                    only print findings and errors
+  -no-progress          disable adaptive progress bar
+  -no-color             disable ANSI colors
   -json                 JSON output
   -jsonl                JSON Lines output
   -o file               write output to a file
 
 examples:
-  hawkprobe http://10.10.10.10 -mode htb -v
-  hawkprobe -mode full -c 64 https://example.com
-  hawkprobe https://example.com -mode exposure -evidence
-  hawkprobe -list targets.txt -target-c 8 -jsonl -o results.jsonl
+  hawkprobe http://10.10.10.10 -mode htb
+  hawkprobe box.htb:80 -mode htb -evidence
+  hawkprobe -list scan.xml -mode htb -target-c 8
+  httpx -l hosts.txt -json | hawkprobe -list - -mode exposure
+  hawkprobe http://box.htb -mode htb -wordlist @common -ext php,bak
+  hawkprobe http://box.htb -wordlist @dirs-medium -c 80
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
-  hawkprobe http://box.htb -mode htb -wordlist paths.txt -ext php,bak
   hawkprobe rules validate custom-rules.json`)
 }
