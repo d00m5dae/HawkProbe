@@ -45,12 +45,13 @@ func main() {
 		os.Exit(2)
 	}
 	results := scanTargets(opts, targets, rules)
+	shouldFail := resultsMeetFailThreshold(results, opts.FailOn)
 	results = filterResultSeverity(results, opts.MinSeverity)
 	if err := outputResults(results, opts); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if resultsMeetFailThreshold(results, opts.FailOn) {
+	if shouldFail {
 		os.Exit(3)
 	}
 }
