@@ -7,8 +7,14 @@ import (
 	"strings"
 )
 
+const maxWordlistRules = 250000
+
 func loadWordlistRules(path, extensions string) ([]rule, error) {
-	f, err := os.Open(path)
+	resolved, err := resolveWordlistSpec(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -23,20 +29,34 @@ func loadWordlistRules(path, extensions string) ([]rule, error) {
 	}
 
 	seen := make(map[string]bool)
-	out := make([]rule, 0, 1024)
+	out := make([]rule, 0, 4096)
 	add := func(p string) {
-		p = "/" + strings.TrimLeft(strings.TrimSpace(p), "/")
-		if p == "/" || seen[p] || len(out) >= 50000 {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.ContainsAny(p, " \t") {
+			return
+		}
+		p = "/" + strings.TrimLeft(p, "/")
+		if p == "/" || seen[p] || len(out) >= maxWordlistRules {
 			return
 		}
 		seen[p] = true
 		id := fmt.Sprintf("wordlist-%d", len(out)+1)
-		out = append(out, normalizeRule(rule{ID: id, Path: p, Name: "wordlist endpoint", Severity: "info", Category: "discovery", Confidence: "medium", Statuses: []int{200, 301, 302, 307, 308, 401, 403}, Profile: "full", Tags: []string{"htb"}}))
+		out = append(out, normalizeRule(rule{
+			ID:         id,
+			Path:       p,
+			Name:       "discovered endpoint",
+			Severity:   "info",
+			Category:   "discovery",
+			Confidence: "medium",
+			Statuses:   []int{200, 204, 301, 302, 307, 308, 401, 403},
+			Profile:    "full",
+			Tags:       []string{"htb", "discovery"},
+		}))
 	}
 
 	s := bufio.NewScanner(f)
 	buf := make([]byte, 64*1024)
-	s.Buffer(buf, 1024*1024)
+	s.Buffer(buf, 4*1024*1024)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -48,7 +68,7 @@ func loadWordlistRules(path, extensions string) ([]rule, error) {
 				add(line + "." + ext)
 			}
 		}
-		if len(out) >= 50000 {
+		if len(out) >= maxWordlistRules {
 			break
 		}
 	}
