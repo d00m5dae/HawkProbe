@@ -2,10 +2,12 @@
 
 ## 1.3.0 (development)
 
-- Added automatic Nmap XML and grepable-output target import through `-list`
+- Added automatic Nmap XML, grepable (`-oG`), and normal saved-text target import through `-list`
+- Added friendly `-nmap` and `-stdin` compatibility aliases over the same input pipeline
 - Added stdin target ingestion with `-list -`
 - Added httpx JSONL input support
 - Added SecLists auto-discovery and presets such as `@common`, `@dirs-medium`, `@graphql`, and `@mcp`
+- Added `-seclists` as a friendly alias for SecLists presets
 - Raised wordlist generation limits for large RAFT/SecLists scans
 - Added adaptive terminal progress bars with automatic suppression for scripts and structured output
 - Added colored terminal findings with `NO_COLOR` and `-no-color` support
