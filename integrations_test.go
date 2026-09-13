@@ -46,6 +46,27 @@ func TestParseNmapGrepable(t *testing.T) {
 	}
 }
 
+func TestParseNmapNormal(t *testing.T) {
+	input := `Nmap scan report for box.htb (10.10.10.30)
+Host is up (0.030s latency).
+PORT     STATE SERVICE
+22/tcp   open  ssh
+80/tcp   open  http
+8443/tcp open  https-alt
+`
+	got := parseNmapNormal(input)
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "http://10.10.10.30") {
+		t.Fatalf("missing normal-output HTTP target: %v", got)
+	}
+	if !strings.Contains(joined, "https://10.10.10.30:8443") {
+		t.Fatalf("missing normal-output HTTPS target: %v", got)
+	}
+	if strings.Contains(joined, ":22") {
+		t.Fatalf("ssh port should not be imported: %v", got)
+	}
+}
+
 func TestParseHTTPXJSONL(t *testing.T) {
 	input := []byte("{\"url\":\"https://app.example\",\"status_code\":200}\n{\"input\":\"api.example\",\"scheme\":\"http\",\"port\":8080}\n")
 	got := parseHTTPXJSONL(input)
