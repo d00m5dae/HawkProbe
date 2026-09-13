@@ -182,6 +182,8 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	jobs := make(chan rule)
 	results := make(chan result, workers*2)
 	var wg sync.WaitGroup
+	progress := newProgressBar(opts, target, len(rules))
+	defer progress.Finish()
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -240,6 +242,7 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	stats := ruleStats{}
 	for r := range results {
 		stats.Checked++
+		progress.Advance()
 		if r.skipped {
 			stats.Skipped++
 			continue
