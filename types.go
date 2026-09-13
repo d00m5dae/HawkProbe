@@ -76,6 +76,9 @@ type options struct {
 	Discover          bool
 	Wordlist          string
 	Extensions        string
+	NoProgress        bool
+	NoColor           bool
+	Quiet             bool
 }
 
 type scanResult struct {
