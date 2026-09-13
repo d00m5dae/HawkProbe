@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a scanner, rule, integration, or UX improvement
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is harder than it should be today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include example CLI behavior if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scanner engine
+        - Built-in rules
+        - Tool integration
+        - SecLists / discovery
+        - Output / reporting
+        - CLI / usability
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
