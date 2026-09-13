@@ -4,14 +4,13 @@
     "path": "/internal/health",
     "name": "internal health endpoint exposed",
     "severity": "low",
+    "category": "debug",
+    "confidence": "high",
+    "method": "GET",
     "statuses": [200],
-    "contains": ["healthy", "ok"]
-  },
-  {
-    "id": "custom-panel",
-    "path": "/private-panel",
-    "name": "private panel found",
-    "severity": "info",
-    "statuses": [200, 401, 403]
+    "contains": ["healthy", "ok"],
+    "regex": "(?i)status\\s*[:=]\\s*(?:healthy|ok)",
+    "content_type": "json",
+    "remediation": "Restrict internal health endpoints to trusted networks."
   }
 ]
