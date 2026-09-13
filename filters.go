@@ -39,6 +39,7 @@ func filterResultSeverity(results []scanResult, minimum string) []scanResult {
 			if f.Severity >= threshold {
 				filtered = append(filtered, f)
 			}
+		}
 		results[i].Findings = filtered
 	}
 	return results
