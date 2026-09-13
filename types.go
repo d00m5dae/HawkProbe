@@ -55,6 +55,9 @@ type options struct {
 	ListFile          string
 	RuleFile          string
 	Mode              string
+	CategoryFilter    string
+	TagFilter         string
+	MinSeverity       string
 	Concurrency       int
 	TargetConcurrency int
 	Rate              int
