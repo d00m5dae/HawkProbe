@@ -24,6 +24,12 @@ func sortFindings(findings []finding) {
 }
 
 func outputResults(results []scanResult, opts options) error {
+	if opts.URLsOut != "" {
+		if err := writeResultURLs(results, opts.URLsOut); err != nil {
+			return err
+		}
+	}
+
 	var w io.Writer = os.Stdout
 	var f *os.File
 	if opts.Output != "" {
