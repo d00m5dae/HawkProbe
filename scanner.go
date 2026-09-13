@@ -22,7 +22,7 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 	start := time.Now()
 	var requests int64
 	if opts.Mode == "tls" {
-		findings := inspectTLS(target, opts.Insecure, opts.Timeout)
+		findings := filterFindingsForOptions(inspectTLS(target, opts.Insecure, opts.Timeout), opts)
 		sortFindings(findings)
 		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Findings: findings}
 	}
@@ -32,7 +32,24 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 		return scanResult{Target: target, DurationMS: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
 
+	var rateTicker *time.Ticker
+	if opts.Rate > 0 {
+		interval := time.Second / time.Duration(opts.Rate)
+		if interval < time.Microsecond {
+			interval = time.Microsecond
+		}
+		rateTicker = time.NewTicker(interval)
+		opts.rateGate = rateTicker.C
+		defer rateTicker.Stop()
+	}
+
 	budget := opts.Timeout * time.Duration(maxInt(8, (len(rules)/maxInt(1, opts.Concurrency))+8))
+	if opts.Rate > 0 {
+		rateBudget := time.Duration(len(rules)+16) * time.Second / time.Duration(opts.Rate)
+		if rateBudget > budget {
+			budget = rateBudget + 10*time.Second
+		}
+	}
 	if budget < 30*time.Second {
 		budget = 30 * time.Second
 	}
@@ -75,6 +92,7 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 	}
 
 	findings = dedupeFindings(findings)
+	findings = filterFindingsForOptions(findings, opts)
 	sortFindings(findings)
 	return scanResult{
 		Target:       target,
@@ -125,6 +143,13 @@ func newClient(opts options) (*http.Client, error) {
 }
 
 func makeRequest(ctx context.Context, client *http.Client, opts options, method, target string, extra http.Header, requests *int64) (*http.Response, error) {
+	if opts.rateGate != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-opts.rateGate:
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, err
@@ -240,6 +265,9 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	stats := ruleStats{}
 	for r := range results {
 		stats.Checked++
+		if opts.progress != nil {
+			opts.progress.Add(1)
+		}
 		if r.skipped {
 			stats.Skipped++
 			continue
