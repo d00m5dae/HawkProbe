@@ -22,12 +22,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+
 	rules, err := loadRules(opts.RuleFile, opts.Mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rules:", err)
 		os.Exit(2)
 	}
 	rules = filterRules(rules, opts.CategoryFilter, opts.TagFilter)
+
 	if opts.Wordlist != "" {
 		wordRules, err := loadWordlistRules(opts.Wordlist, opts.Extensions)
 		if err != nil {
@@ -36,6 +38,7 @@ func main() {
 		}
 		rules = append(rules, wordRules...)
 	}
+
 	targets, err := loadTargets(opts.Target, opts.ListFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -46,6 +49,9 @@ func main() {
 	if err := outputResults(results, opts); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if resultsMeetFailThreshold(results, opts.FailOn) {
+		os.Exit(3)
 	}
 }
 
@@ -62,6 +68,16 @@ func handleCommand(args []string) bool {
 		return true
 	case "doctor":
 		printDoctor()
+		return true
+	case "completion":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: hawkprobe completion bash|zsh|fish")
+			os.Exit(2)
+		}
+		if err := printCompletion(args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 		return true
 	case "wordlists":
 		root := findSecListsRoot()
@@ -107,6 +123,7 @@ func parseFlags() (options, error) {
 	fs := flag.NewFlagSet("hawkprobe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var profileAlias string
+
 	fs.StringVar(&opts.ListFile, "list", "", "target file, stdin (-), Nmap XML/gnmap, or httpx JSONL")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
@@ -114,6 +131,7 @@ func parseFlags() (options, error) {
 	fs.StringVar(&opts.CategoryFilter, "category", "", "only scan comma-separated rule categories")
 	fs.StringVar(&opts.TagFilter, "tag", "", "only scan rules matching comma-separated tags")
 	fs.StringVar(&opts.MinSeverity, "severity", "", "only output findings at or above info/low/medium/high/critical")
+	fs.StringVar(&opts.FailOn, "fail-on", "", "exit 3 when a finding reaches this severity")
 	fs.IntVar(&opts.Concurrency, "c", 32, "concurrent requests per target")
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
 	fs.IntVar(&opts.Rate, "rate", 0, "maximum requests per second per target (0 = unlimited)")
@@ -121,6 +139,8 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.Insecure, "k", false, "allow invalid TLS certificates")
 	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
 	fs.BoolVar(&opts.JSONL, "jsonl", false, "JSON Lines output")
+	fs.BoolVar(&opts.CSV, "csv", false, "CSV findings output")
+	fs.BoolVar(&opts.SARIF, "sarif", false, "SARIF 2.1.0 output")
 	fs.StringVar(&opts.Output, "o", "", "write output to a file")
 	fs.StringVar(&opts.URLsOut, "urls-out", "", "write unique target/finding URLs for nuclei/httpx/ffuf pipelines")
 	fs.Var(&opts.Headers, "H", "custom header, repeatable: 'Name: value'")
@@ -140,6 +160,7 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.NoProgress, "no-progress", false, "disable terminal progress bar")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "disable ANSI colors")
 	fs.BoolVar(&opts.Quiet, "q", false, "only print findings and errors")
+
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
@@ -173,12 +194,23 @@ func parseFlags() (options, error) {
 	if opts.MaxRedirects < 1 || opts.MaxRedirects > 20 {
 		return opts, errors.New("max-redirects must be between 1 and 20")
 	}
-	if opts.JSON && opts.JSONL {
-		return opts, errors.New("use either -json or -jsonl")
+
+	formats := 0
+	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF} {
+		if enabled {
+			formats++
+		}
+	}
+	if formats > 1 {
+		return opts, errors.New("use only one of -json, -jsonl, -csv, or -sarif")
 	}
 	if !validSeverityName(opts.MinSeverity) {
 		return opts, fmt.Errorf("invalid severity %q", opts.MinSeverity)
 	}
+	if !validSeverityName(opts.FailOn) {
+		return opts, fmt.Errorf("invalid fail-on severity %q", opts.FailOn)
+	}
+
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
 	opts.Mode = lower(opts.Mode)
 	if !validModes[opts.Mode] {
@@ -194,7 +226,14 @@ func parseFlags() (options, error) {
 }
 
 func reorderArgs(args []string) []string {
-	valueFlags := map[string]bool{"-list": true, "-rules": true, "-mode": true, "-profile": true, "-category": true, "-tag": true, "-severity": true, "-c": true, "-target-c": true, "-rate": true, "-timeout": true, "-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true, "-token": true, "-proxy": true, "-max-redirects": true, "-ua": true, "-host": true, "-wordlist": true, "-ext": true}
+	valueFlags := map[string]bool{
+		"-list": true, "-rules": true, "-mode": true, "-profile": true,
+		"-category": true, "-tag": true, "-severity": true, "-fail-on": true,
+		"-c": true, "-target-c": true, "-rate": true, "-timeout": true,
+		"-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true,
+		"-token": true, "-proxy": true, "-max-redirects": true, "-ua": true,
+		"-host": true, "-wordlist": true, "-ext": true,
+	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -258,6 +297,7 @@ usage:
   hawkprobe rules validate custom-rules.json
   hawkprobe wordlists
   hawkprobe doctor
+  hawkprobe completion bash|zsh|fish
   hawkprobe version
 
 modes:
@@ -285,6 +325,7 @@ scan selection:
   -category list        only categories, e.g. cloud,devops,backup
   -tag list             only tags, e.g. htb,exposure
   -severity level       only output findings at/above a severity
+  -fail-on level        exit 3 if a finding reaches a severity
 
 scan options:
   -c int                concurrent requests per target (default 32)
@@ -312,6 +353,8 @@ terminal/output:
   -urls-out file        unique URLs for nuclei/httpx/ffuf chaining
   -json                 JSON output
   -jsonl                JSON Lines output
+  -csv                  CSV findings output
+  -sarif                SARIF 2.1.0 output
   -o file               write output to a file
 
 examples:
@@ -323,8 +366,11 @@ examples:
   hawkprobe http://box.htb -wordlist @dirs-medium -c 80 -rate 250
   hawkprobe https://app.lab -mode full -category cloud,devops
   hawkprobe https://app.lab -mode full -severity medium
+  hawkprobe https://app.lab -mode exposure -fail-on high
+  hawkprobe -list targets.txt -sarif -o hawkprobe.sarif
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
   hawkprobe https://app.lab -mode full -urls-out discovered.txt
   nuclei -l discovered.txt
+  hawkprobe completion zsh
   hawkprobe rules validate custom-rules.json`)
 }
