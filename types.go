@@ -57,11 +57,13 @@ type options struct {
 	Mode              string
 	Concurrency       int
 	TargetConcurrency int
+	Rate              int
 	Timeout           time.Duration
 	Insecure          bool
 	JSON              bool
 	JSONL             bool
 	Output            string
+	URLsOut           string
 	Headers           headerList
 	User              string
 	Pass              string
