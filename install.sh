@@ -22,7 +22,12 @@ if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 20 ]; }; then
     exit 1
 fi
 
-GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=1.1.0" -o hawkprobe .
+build_version=${HAWKPROBE_VERSION:-}
+if [ -z "$build_version" ]; then
+    build_version=$(git describe --tags --always --dirty 2>/dev/null || printf '%s' source)
+fi
+
+GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$build_version" -o hawkprobe .
 
 if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
     install -m 755 hawkprobe /usr/local/bin/hawkprobe
