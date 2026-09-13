@@ -20,7 +20,7 @@ type progressBar struct {
 
 func newProgressBar(opts options, target string, total int) *progressBar {
 	p := &progressBar{target: target, total: total, started: time.Now()}
-	if total < 1 || opts.NoProgress || opts.Verbose || opts.JSON || opts.JSONL {
+	if total < 1 || opts.NoProgress || opts.Verbose || opts.Quiet || opts.JSON || opts.JSONL || opts.CSV || opts.SARIF {
 		return p
 	}
 	if !isTerminal(os.Stderr) || os.Getenv("TERM") == "dumb" {
