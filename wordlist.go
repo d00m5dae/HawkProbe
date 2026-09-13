@@ -7,12 +7,15 @@ import (
 	"strings"
 )
 
-func loadWordlistRules(path, extensions string) ([]rule, error) {
+func loadWordlistRules(path, extensions string, limit int) ([]rule, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if limit < 1 {
+		limit = 50000
+	}
 
 	var exts []string
 	for _, ext := range strings.Split(extensions, ",") {
@@ -23,10 +26,10 @@ func loadWordlistRules(path, extensions string) ([]rule, error) {
 	}
 
 	seen := make(map[string]bool)
-	out := make([]rule, 0, 1024)
+	out := make([]rule, 0, minInt(limit, 4096))
 	add := func(p string) {
 		p = "/" + strings.TrimLeft(strings.TrimSpace(p), "/")
-		if p == "/" || seen[p] || len(out) >= 50000 {
+		if p == "/" || seen[p] || len(out) >= limit {
 			return
 		}
 		seen[p] = true
@@ -36,7 +39,7 @@ func loadWordlistRules(path, extensions string) ([]rule, error) {
 
 	s := bufio.NewScanner(f)
 	buf := make([]byte, 64*1024)
-	s.Buffer(buf, 1024*1024)
+	s.Buffer(buf, 4*1024*1024)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -48,7 +51,7 @@ func loadWordlistRules(path, extensions string) ([]rule, error) {
 				add(line + "." + ext)
 			}
 		}
-		if len(out) >= 50000 {
+		if len(out) >= limit {
 			break
 		}
 	}
