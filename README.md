@@ -14,12 +14,14 @@ It is built for the part of a pentest where you already have HTTP services and w
 
 ## Why HawkProbe
 
+- **450+ built-in checks** across exposure, backup, cloud, DevOps, admin, API, debug, CMS/framework, source/build, and metadata classes.
 - **Fast by default** — concurrent Go HTTP engine, connection reuse, HTTP/2, multi-target workers, and optional request pacing.
 - **Useful on HTB/CTFs** — `htb` mode, Host-header overrides, exposed-file checks, framework/debug discovery, and optional SecLists enumeration.
 - **Pipeline friendly** — plain files, stdin, Nmap XML, Nmap grepable output, and httpx JSONL can all become scan targets.
 - **No runtime stack** — one Go binary; no Python, Perl, Node, Docker, or template engine required.
 - **Low-noise design** — randomized missing-path baselines help reject wildcard routes and soft 404s.
-- **Readable findings** — severity, category, confidence, evidence, remediation, URL, and structured JSON/JSONL output.
+- **Readable findings** — severity, category, confidence, evidence, remediation, URL, and structured JSON/JSONL/CSV/SARIF output.
+- **CI friendly** — fail builds on a configurable severity threshold with `-fail-on`.
 - **Extensible** — custom JSON rules, category/tag filtering, and a built-in rule database organized around real exposure classes.
 
 ## Install
@@ -74,7 +76,7 @@ Broad scan with a faster request pool:
 hawkprobe https://example.com -mode full -c 64
 ```
 
-A live terminal gets an adaptive progress bar automatically. Progress disables itself for JSON, JSONL, verbose output, and redirected stderr.
+A live terminal gets an adaptive progress bar automatically. Progress disables itself for structured output, quiet mode, verbose mode, or redirected stderr.
 
 ## Scan modes
 
@@ -277,7 +279,7 @@ hawkprobe https://app.example -proxy http://127.0.0.1:8080 -k
 
 Secrets supplied through auth flags are not intentionally printed in findings.
 
-## Output
+## Output and automation
 
 Human-readable terminal output is the default.
 
@@ -311,11 +313,43 @@ JSON Lines across many targets:
 hawkprobe -list targets.txt -jsonl -o results.jsonl
 ```
 
+CSV for spreadsheets/reporting:
+
+```bash
+hawkprobe -list targets.txt -csv -o findings.csv
+```
+
+SARIF for security/CI tooling:
+
+```bash
+hawkprobe -list targets.txt -sarif -o hawkprobe.sarif
+```
+
+Make a CI job fail with exit code `3` when a high-or-critical finding appears:
+
+```bash
+hawkprobe https://staging.example -mode exposure -fail-on high
+```
+
+`-fail-on` does not change what HawkProbe scans or prints. It only controls the final process exit code.
+
 Structured findings include fields such as rule ID, category, severity, confidence, URL, evidence, and remediation when available.
+
+## Shell completion
+
+HawkProbe can generate completion scripts without installing an extra package:
+
+```bash
+hawkprobe completion bash
+hawkprobe completion zsh
+hawkprobe completion fish
+```
+
+You can redirect the output into the completion directory used by your shell or source it from your shell configuration.
 
 ## Built-in coverage
 
-The catalog includes hundreds of checks across areas such as:
+The catalog includes 450+ checks across areas such as:
 
 - Git, SVN, Mercurial, Bazaar, CVS, and other repository metadata
 - environment/configuration files
