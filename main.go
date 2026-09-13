@@ -124,6 +124,7 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
 	fs.BoolVar(&opts.JSONL, "jsonl", false, "JSON Lines output")
 	fs.BoolVar(&opts.CSV, "csv", false, "CSV findings output")
+	fs.BoolVar(&opts.SARIF, "sarif", false, "SARIF 2.1.0 output")
 	fs.StringVar(&opts.Output, "o", "", "write output to a file")
 	fs.Var(&opts.Headers, "H", "custom header, repeatable: 'Name: value'")
 	fs.StringVar(&opts.User, "user", "", "basic auth username")
@@ -179,13 +180,13 @@ func parseFlags() (options, error) {
 		return opts, errors.New("max-redirects must be between 1 and 20")
 	}
 	formats := 0
-	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV} {
+	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF} {
 		if enabled {
 			formats++
 		}
 	}
 	if formats > 1 {
-		return opts, errors.New("use only one of -json, -jsonl, or -csv")
+		return opts, errors.New("use only one of -json, -jsonl, -csv, or -sarif")
 	}
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
 	opts.Mode = lower(opts.Mode)
@@ -241,7 +242,7 @@ func scanTargets(opts options, targets []string, rules []rule) []scanResult {
 	if workers < 1 {
 		return results
 	}
-	if opts.Progress && !opts.Verbose && !opts.JSON && !opts.JSONL && !opts.CSV && len(rules) > 0 {
+	if opts.Progress && !opts.Verbose && !opts.JSON && !opts.JSONL && !opts.CSV && !opts.SARIF && len(rules) > 0 {
 		opts.progress = newProgressTracker(len(targets) * len(rules))
 		defer opts.progress.Finish()
 	}
@@ -334,6 +335,7 @@ output:
   -json                 JSON output
   -jsonl                JSON Lines output
   -csv                  CSV findings output
+  -sarif                SARIF 2.1.0 output for security tooling
   -o file               write output to a file
 
 examples:
@@ -343,6 +345,7 @@ examples:
   hawkprobe box.htb -mode htb -seclists raft-small -ext php,bak -c 64
   hawkprobe box.htb -seclists common -seclists-root ~/SecLists
   hawkprobe https://example.com -mode exposure -evidence -fail-on high
+  hawkprobe -list targets.txt -sarif -o hawkprobe.sarif
   hawkprobe -list targets.txt -jsonl -o results.jsonl
   hawkprobe rules validate custom-rules.json`)
 }
