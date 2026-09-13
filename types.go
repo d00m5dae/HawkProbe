@@ -58,6 +58,7 @@ type options struct {
 	CategoryFilter    string
 	TagFilter         string
 	MinSeverity       string
+	FailOn            string
 	Concurrency       int
 	TargetConcurrency int
 	Rate              int
@@ -65,6 +66,8 @@ type options struct {
 	Insecure          bool
 	JSON              bool
 	JSONL             bool
+	CSV               bool
+	SARIF             bool
 	Output            string
 	URLsOut           string
 	Headers           headerList
