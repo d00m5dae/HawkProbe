@@ -106,8 +106,10 @@ type scanResult struct {
 	RulesChecked int       `json:"rules_checked,omitempty"`
 	NoMatch      int       `json:"no_match,omitempty"`
 	Skipped      int       `json:"skipped,omitempty"`
+	Suppressed   int       `json:"suppressed,omitempty"`
 	Findings     []finding `json:"findings"`
 	Error        string    `json:"error,omitempty"`
+	AISummary    string    `json:"ai_summary,omitempty"`
 }
 
 type ruleStats struct {
