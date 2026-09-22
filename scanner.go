@@ -93,7 +93,7 @@ func fetchWithRetry(ctx context.Context, client *http.Client, opts options, meth
 	return nil, nil, lastErr
 }
 
-func scanTarget(opts options, target string, rules []rule) scanResult {
+func scanTarget(opts options, target string, rules []rule, custom []customRule) scanResult {
 	start := time.Now()
 	var requests int64
 	if opts.Mode == "tls" {
@@ -147,6 +147,10 @@ func scanTarget(opts options, target string, rules []rule) scanResult {
 	}
 	if opts.Mode != "tech" {
 		findings = append(findings, inspectTLS(target, opts.Insecure, opts.Timeout)...)
+	}
+
+	if len(custom) > 0 {
+		findings = append(findings, runCustomRules(ctx, client, opts, target, custom, &requests)...)
 	}
 
 	findings = dedupeFindings(findings)

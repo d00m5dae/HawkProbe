@@ -54,6 +54,7 @@ type options struct {
 	Target            string
 	ListFile          string
 	RuleFile          string
+	CustomRules       string
 	Mode              string
 	CategoryFilter    string
 	TagFilter         string

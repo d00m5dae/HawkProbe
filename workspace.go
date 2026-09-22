@@ -67,6 +67,7 @@ type savedOptions struct {
 	UserAgent         string   `json:"user-agent,omitempty"`
 	HostHeader        string   `json:"host-header,omitempty"`
 	Suppressions      string   `json:"suppressions,omitempty"`
+	CustomRules       string   `json:"custom-rules,omitempty"`
 	AI                bool     `json:"ai,omitempty"`
 	AIModel           string   `json:"ai-model,omitempty"`
 }
@@ -297,6 +298,7 @@ func optionsFromMeta(meta scanMeta) options {
 		UserAgent:         o.UserAgent,
 		HostHeader:        o.HostHeader,
 		Suppressions:      o.Suppressions,
+		CustomRules:       o.CustomRules,
 		AI:                o.AI,
 		AIModel:           o.AIModel,
 	}
@@ -330,6 +332,7 @@ func savedOptionsFromOptions(opts options) savedOptions {
 		UserAgent:         opts.UserAgent,
 		HostHeader:        opts.HostHeader,
 		Suppressions:      opts.Suppressions,
+		CustomRules:       opts.CustomRules,
 		AI:                opts.AI,
 		AIModel:           opts.AIModel,
 	}
@@ -611,8 +614,9 @@ func handleResumeCommand(args []string) {
 		}
 		rules = append(rules, wordRules...)
 	}
+	custom := loadCustomRuleList(opts)
 	started := time.Now()
-	results := scanTargets(opts, pending, rules)
+	results := scanTargets(opts, pending, rules, custom)
 	merged := append(append([]scanResult{}, existing...), results...)
 	meta.ScannedTargets = sortedKeys(scannedTargetSet(merged))
 	if len(meta.ScannedTargets) == len(meta.Targets) {

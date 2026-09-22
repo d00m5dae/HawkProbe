@@ -109,7 +109,7 @@ func TestMaxRequestsBudgetStopsRuleScan(t *testing.T) {
 		{ID: "b", Path: "/b", Name: "b", Severity: "info", Statuses: []int{200}},
 		{ID: "c", Path: "/c", Name: "c", Severity: "info", Statuses: []int{200}},
 	}
-	result := scanTarget(opts, srv.URL, rules)
+	result := scanTarget(opts, srv.URL, rules, nil)
 	if result.Error != "" {
 		t.Fatalf("unexpected error: %s", result.Error)
 	}

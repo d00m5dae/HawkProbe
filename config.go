@@ -26,6 +26,7 @@ type configProfile struct {
 	Discover          bool   `json:"discover,omitempty"`
 	Insecure          bool   `json:"insecure,omitempty"`
 	Suppressions      string `json:"suppressions,omitempty"`
+	CustomRules       string `json:"custom-rules,omitempty"`
 	AI                bool   `json:"ai,omitempty"`
 	AIModel           string `json:"ai-model,omitempty"`
 }
@@ -196,6 +197,9 @@ func applyProfile(opts *options, cfg configData, set map[string]bool) error {
 	}
 	if p.Suppressions != "" && notSet("suppressions") {
 		opts.Suppressions = p.Suppressions
+	}
+	if p.CustomRules != "" && notSet("custom-rules") {
+		opts.CustomRules = p.CustomRules
 	}
 	if p.AI && notSet("ai") {
 		opts.AI = true

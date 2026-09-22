@@ -69,7 +69,7 @@ func main() {
 		os.Exit(2)
 	}
 	scanStarted := time.Now()
-	results := scanTargets(opts, targets, rules)
+	results := scanTargets(opts, targets, rules, loadCustomRuleList(opts))
 	if len(sup.Suppressions) > 0 {
 		applySuppressions(results, sup)
 	}
@@ -150,6 +150,15 @@ func handleCommand(args []string) bool {
 			fmt.Println("rules valid")
 			return true
 		}
+		if len(args) >= 3 && args[1] == "check" {
+			cf, err := loadCustomRules(args[2])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "invalid:", err)
+				os.Exit(2)
+			}
+			fmt.Printf("%d custom rule(s) valid\n", len(cf.Rules))
+			return true
+		}
 		if len(args) >= 2 && args[1] == "list" {
 			for _, r := range builtinRules {
 				fmt.Printf("%-32s %-12s %-8s %s\n", r.ID, r.Category, r.Severity, r.Path)
@@ -177,6 +186,7 @@ func parseFlags() (options, error) {
 	fs.StringVar(&nmapAlias, "nmap", "", "alias for -list with Nmap output")
 	fs.BoolVar(&stdinAlias, "stdin", false, "alias for -list -")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
+	fs.StringVar(&opts.CustomRules, "custom-rules", "", "custom rule DSL file (JSON)")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
 	fs.StringVar(&profileAlias, "profile", "", "scan profile from config file, or a built-in mode name")
 	fs.StringVar(&opts.CategoryFilter, "category", "", "only scan comma-separated rule categories")
@@ -331,6 +341,7 @@ func reorderArgs(args []string) []string {
 		"-token": true, "-proxy": true, "-max-redirects": true, "-ua": true,
 		"-host": true, "-wordlist": true, "-seclists": true, "-ext": true,
 		"-workspace": true, "-suppressions": true, "-bundle": true, "-ai-model": true,
+		"-custom-rules": true,
 	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
@@ -352,7 +363,7 @@ func reorderArgs(args []string) []string {
 	return append(flags, positional...)
 }
 
-func scanTargets(opts options, targets []string, rules []rule) []scanResult {
+func scanTargets(opts options, targets []string, rules []rule, custom []customRule) []scanResult {
 	results := make([]scanResult, len(targets))
 	workers := minInt(opts.TargetConcurrency, len(targets))
 	if workers < 1 {
@@ -369,7 +380,7 @@ func scanTargets(opts options, targets []string, rules []rule) []scanResult {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				results[j.index] = scanTarget(opts, j.target, rules)
+				results[j.index] = scanTarget(opts, j.target, rules, custom)
 			}
 		}()
 	}
