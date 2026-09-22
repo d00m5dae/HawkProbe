@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 (development)
+## 1.4.0 (2026-09-22)
 
 - Added HTML and Markdown report output with `-html` / `-md`, plus `-bundle dir` which writes report.html, report.md, findings.csv, hawkprobe.sarif, results.json, and results.jsonl in one call
 - Added named scan profiles with `-profile` and `hawkprobe config show|set|rm`; profiles live in `~/.config/hawkprobe/config.json` and can pin mode, categories, rate, concurrency, severity, fail-on, wordlists, suppressions, custom rules, and AI settings

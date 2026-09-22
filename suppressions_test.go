@@ -80,13 +80,13 @@ func TestSuppressionsFileRoundtrip(t *testing.T) {
 
 func TestParseDurationLoose(t *testing.T) {
 	cases := map[string]time.Duration{
-		"30d":  30 * 24 * time.Hour,
-		"2w":   14 * 24 * time.Hour,
-		"12h":  12 * time.Hour,
-		"90m":  90 * time.Minute,
-		"48h":  48 * time.Hour,
-		"3d":   72 * time.Hour,
-		"3w":   504 * time.Hour,
+		"30d":   30 * 24 * time.Hour,
+		"2w":    14 * 24 * time.Hour,
+		"12h":   12 * time.Hour,
+		"90m":   90 * time.Minute,
+		"48h":   48 * time.Hour,
+		"3d":    72 * time.Hour,
+		"3w":    504 * time.Hour,
 		"1500h": 1500 * time.Hour,
 	}
 	for in, want := range cases {

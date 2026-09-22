@@ -229,6 +229,7 @@ func parseFlags() (options, error) {
 	fs.StringVar(&opts.Bundle, "bundle", "", "write a report bundle (HTML, Markdown, JSON, CSV, SARIF) to a directory")
 	fs.BoolVar(&opts.HTML, "html", false, "HTML report output")
 	fs.BoolVar(&opts.Markdown, "markdown", false, "Markdown report output")
+	fs.BoolVar(&opts.Markdown, "md", false, "alias for -markdown")
 	fs.BoolVar(&opts.AI, "ai", false, "generate per-target AI summaries via Ollama (optional)")
 	fs.StringVar(&opts.AIModel, "ai-model", "", "Ollama model for AI summaries (default from config or llama3.2)")
 
@@ -304,7 +305,7 @@ func parseFlags() (options, error) {
 		}
 	}
 	if formats > 1 {
-		return opts, errors.New("use only one of -json, -jsonl, -csv, -sarif, -html, or -markdown")
+		return opts, errors.New("use only one of -json, -jsonl, -csv, -sarif, -html, or -markdown/-md")
 	}
 	if formats > 0 && opts.Bundle != "" {
 		return opts, errors.New("-bundle already writes all formats; remove the explicit format flag")
@@ -476,7 +477,7 @@ terminal/output:
   -csv                  CSV findings output
   -sarif                SARIF 2.1.0 output
   -html                 single-file HTML report
-  -markdown             Markdown report
+  -markdown, -md        Markdown report
   -bundle dir           write HTML + Markdown + JSON + CSV + SARIF bundle
   -o file               write output to a file
 

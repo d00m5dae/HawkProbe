@@ -7,15 +7,15 @@ import (
 )
 
 type catalogGroup struct {
-	prefix     string
-	name       string
-	severity   string
-	category   string
-	profile    string
-	statuses   []int
-	tags       []string
+	prefix      string
+	name        string
+	severity    string
+	category    string
+	profile     string
+	statuses    []int
+	tags        []string
 	remediation string
-	paths      []string
+	paths       []string
 }
 
 func init() {

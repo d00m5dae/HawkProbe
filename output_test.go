@@ -28,10 +28,10 @@ func renderToTempFile(t *testing.T, results []scanResult, mutate func(*options))
 
 func groupedSampleResults() []scanResult {
 	return []scanResult{{
-		Target:     "https://example.test",
-		Status:     "200 OK",
-		Requests:   40,
-		DurationMS: 1200,
+		Target:       "https://example.test",
+		Status:       "200 OK",
+		Requests:     40,
+		DurationMS:   1200,
 		RulesChecked: 40,
 		Findings: []finding{
 			{Severity: high, Level: "high", Rule: "env", Category: "config", Message: "exposed environment file", URL: "https://example.test/.env", Evidence: "HTTP 200", Remediation: "remove it"},
@@ -111,8 +111,8 @@ func TestHTMLReportEscapes(t *testing.T) {
 		Requests: 1,
 		Findings: []finding{{
 			Severity: low, Level: "low",
-			Message:  "bad <script>alert(1)</script> & \"quotes\"",
-			URL:      "https://example.test/x",
+			Message: "bad <script>alert(1)</script> & \"quotes\"",
+			URL:     "https://example.test/x",
 		}},
 	}}
 	var buf bytes.Buffer

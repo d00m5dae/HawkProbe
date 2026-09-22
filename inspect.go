@@ -81,21 +81,51 @@ func fingerprint(target string, resp *http.Response, body []byte) []finding {
 		seen[id] = true
 		out = append(out, finding{Severity: info, Level: info.String(), Rule: id, Category: "technology", Confidence: "medium", Message: "technology: " + name, URL: target, Evidence: evidence})
 	}
-	if strings.Contains(server, "nginx") { add("tech-nginx", "nginx", resp.Header.Get("Server")) }
-	if strings.Contains(server, "apache") { add("tech-apache", "Apache", resp.Header.Get("Server")) }
-	if strings.Contains(server, "microsoft-iis") { add("tech-iis", "Microsoft IIS", resp.Header.Get("Server")) }
-	if strings.Contains(server, "caddy") { add("tech-caddy", "Caddy", resp.Header.Get("Server")) }
-	if strings.Contains(server, "cloudflare") || resp.Header.Get("CF-Ray") != "" { add("tech-cloudflare", "Cloudflare", "Cloudflare response headers") }
-	if strings.Contains(powered, "php") { add("tech-php", "PHP", resp.Header.Get("X-Powered-By")) }
-	if strings.Contains(powered, "asp.net") || strings.Contains(cookies, "asp.net_sessionid") { add("tech-aspnet", "ASP.NET", "ASP.NET header/cookie marker") }
-	if strings.Contains(powered, "express") || strings.Contains(text, "connect.sid") { add("tech-express", "Express", "Express header/cookie marker") }
-	if strings.Contains(text, "wp-content/") || strings.Contains(text, "wp-includes/") { add("tech-wordpress", "WordPress", "WordPress asset paths") }
-	if strings.Contains(text, "__next_data__") || strings.Contains(text, "/_next/static/") { add("tech-nextjs", "Next.js", "Next.js asset markers") }
-	if strings.Contains(text, "laravel_session") || strings.Contains(cookies, "laravel_session") { add("tech-laravel", "Laravel", "Laravel session marker") }
-	if strings.Contains(cookies, "csrftoken") && strings.Contains(cookies, "sessionid") { add("tech-django", "Django", "Django cookie markers") }
-	if strings.Contains(text, "grafana") && strings.Contains(text, "public/build") { add("tech-grafana", "Grafana", "Grafana frontend markers") }
-	if strings.Contains(text, "jenkins") && strings.Contains(text, "adjuncts") { add("tech-jenkins", "Jenkins", "Jenkins frontend markers") }
-	if strings.Contains(text, "spring") && strings.Contains(text, "whitelabel error page") { add("tech-spring", "Spring Boot", "Spring Boot error-page marker") }
+	if strings.Contains(server, "nginx") {
+		add("tech-nginx", "nginx", resp.Header.Get("Server"))
+	}
+	if strings.Contains(server, "apache") {
+		add("tech-apache", "Apache", resp.Header.Get("Server"))
+	}
+	if strings.Contains(server, "microsoft-iis") {
+		add("tech-iis", "Microsoft IIS", resp.Header.Get("Server"))
+	}
+	if strings.Contains(server, "caddy") {
+		add("tech-caddy", "Caddy", resp.Header.Get("Server"))
+	}
+	if strings.Contains(server, "cloudflare") || resp.Header.Get("CF-Ray") != "" {
+		add("tech-cloudflare", "Cloudflare", "Cloudflare response headers")
+	}
+	if strings.Contains(powered, "php") {
+		add("tech-php", "PHP", resp.Header.Get("X-Powered-By"))
+	}
+	if strings.Contains(powered, "asp.net") || strings.Contains(cookies, "asp.net_sessionid") {
+		add("tech-aspnet", "ASP.NET", "ASP.NET header/cookie marker")
+	}
+	if strings.Contains(powered, "express") || strings.Contains(text, "connect.sid") {
+		add("tech-express", "Express", "Express header/cookie marker")
+	}
+	if strings.Contains(text, "wp-content/") || strings.Contains(text, "wp-includes/") {
+		add("tech-wordpress", "WordPress", "WordPress asset paths")
+	}
+	if strings.Contains(text, "__next_data__") || strings.Contains(text, "/_next/static/") {
+		add("tech-nextjs", "Next.js", "Next.js asset markers")
+	}
+	if strings.Contains(text, "laravel_session") || strings.Contains(cookies, "laravel_session") {
+		add("tech-laravel", "Laravel", "Laravel session marker")
+	}
+	if strings.Contains(cookies, "csrftoken") && strings.Contains(cookies, "sessionid") {
+		add("tech-django", "Django", "Django cookie markers")
+	}
+	if strings.Contains(text, "grafana") && strings.Contains(text, "public/build") {
+		add("tech-grafana", "Grafana", "Grafana frontend markers")
+	}
+	if strings.Contains(text, "jenkins") && strings.Contains(text, "adjuncts") {
+		add("tech-jenkins", "Jenkins", "Jenkins frontend markers")
+	}
+	if strings.Contains(text, "spring") && strings.Contains(text, "whitelabel error page") {
+		add("tech-spring", "Spring Boot", "Spring Boot error-page marker")
+	}
 	return out
 }
 
