@@ -63,8 +63,16 @@ func main() {
 	if opts.Workspace != "" {
 		workspaceOverride = opts.Workspace
 	}
+	sup, err := loadSuppressions(opts.Suppressions)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	scanStarted := time.Now()
 	results := scanTargets(opts, targets, rules)
+	if len(sup.Suppressions) > 0 {
+		applySuppressions(results, sup)
+	}
 	recordWorkspaceScan(targets, results, opts, len(rules), scanStarted)
 	shouldFail := resultsMeetFailThreshold(results, opts.FailOn)
 	results = filterResultSeverity(results, opts.MinSeverity)
@@ -115,6 +123,9 @@ func handleCommand(args []string) bool {
 		return true
 	case "config":
 		handleConfigCommand(args)
+		return true
+	case "suppress":
+		handleSuppressCommand(args)
 		return true
 	case "workspace":
 		handleWorkspaceCommand(args)
