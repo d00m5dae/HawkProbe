@@ -37,7 +37,7 @@ jobs:
           HP="$RUNNER_TEMP/hawkprobe"
 
           # rule catalog and rule files
-          "$HP" rules stats | head -1
+          "$HP" rules stats | awk '/built-in rules/{ok=1} END{exit !ok}'
           "$HP" rules validate custom-rules.example.json
           "$HP" rules check custom-rules.dsl.example.json
 
