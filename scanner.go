@@ -18,6 +18,81 @@ import (
 
 var verboseMu sync.Mutex
 
+var errBudgetExhausted = errors.New("request budget exhausted")
+
+func isTransientStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
+func isTransientError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+	return errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func retryDelay(attempt int) time.Duration {
+	base := time.Duration(150*attempt) * time.Millisecond
+	return base + time.Duration(attempt)*15*time.Millisecond
+}
+
+func fetchWithRetry(ctx context.Context, client *http.Client, opts options, method, target string, extra http.Header, limit int64, requests *int64) (*http.Response, []byte, error) {
+	attempts := opts.Retries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(retryDelay(attempt)):
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+		resp, err := makeRequest(ctx, client, opts, method, target, extra, requests)
+		if err != nil {
+			if errors.Is(err, errBudgetExhausted) {
+				return nil, nil, err
+			}
+			lastErr = err
+			if !isTransientError(ctx, err) || attempt == attempts-1 {
+				return nil, nil, err
+			}
+			continue
+		}
+		if isTransientStatus(resp.StatusCode) && opts.Retries > 0 {
+			if attempt == attempts-1 {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+				resp.Body.Close()
+				return nil, nil, fmt.Errorf("transient HTTP %d after %d attempt(s)", resp.StatusCode, attempt+1)
+			}
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("transient HTTP %d", resp.StatusCode)
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, limit))
+		resp.Body.Close()
+		if readErr != nil {
+			if isTransientError(ctx, readErr) && attempt < attempts-1 {
+				lastErr = readErr
+				continue
+			}
+			return nil, nil, readErr
+		}
+		return resp, body, nil
+	}
+	return nil, nil, lastErr
+}
+
 func scanTarget(opts options, target string, rules []rule) scanResult {
 	start := time.Now()
 	var requests int64
@@ -152,21 +227,24 @@ func makeRequest(ctx context.Context, client *http.Client, opts options, method,
 	} else if opts.User != "" || opts.Pass != "" {
 		req.SetBasicAuth(opts.User, opts.Pass)
 	}
-	atomic.AddInt64(requests, 1)
+	if opts.MaxRequests > 0 {
+		for {
+			n := atomic.LoadInt64(requests)
+			if n >= int64(opts.MaxRequests) {
+				return nil, errBudgetExhausted
+			}
+			if atomic.CompareAndSwapInt64(requests, n, n+1) {
+				break
+			}
+		}
+	} else {
+		atomic.AddInt64(requests, 1)
+	}
 	return client.Do(req)
 }
 
 func fetchBody(ctx context.Context, client *http.Client, opts options, method, target string, extra http.Header, limit int64, requests *int64) (*http.Response, []byte, error) {
-	resp, err := makeRequest(ctx, client, opts, method, target, extra, requests)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
-	if err != nil {
-		return nil, nil, err
-	}
-	return resp, body, nil
+	return fetchWithRetry(ctx, client, opts, method, target, extra, limit, requests)
 }
 
 func scanRules(ctx context.Context, client *http.Client, opts options, target string, rules []rule, base baseline, requests *int64) ([]finding, ruleStats) {
@@ -181,6 +259,7 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	}
 	jobs := make(chan rule)
 	results := make(chan result, workers*2)
+	var budgetHit atomic.Bool
 	var wg sync.WaitGroup
 	progress := newProgressBar(opts, target, len(rules))
 	defer progress.Finish()
@@ -193,6 +272,9 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 				u := joinURL(target, r.Path)
 				resp, body, err := fetchBody(ctx, client, opts, r.Method, u, nil, 384*1024, requests)
 				if err != nil {
+					if errors.Is(err, errBudgetExhausted) {
+						budgetHit.Store(true)
+					}
 					verboseCheck(opts, r.Path, 0, "error")
 					results <- result{skipped: true}
 					continue
@@ -226,6 +308,9 @@ func scanRules(ctx context.Context, client *http.Client, opts options, target st
 	go func() {
 		defer close(results)
 		for _, r := range rules {
+			if budgetHit.Load() {
+				break
+			}
 			select {
 			case jobs <- r:
 			case <-ctx.Done():

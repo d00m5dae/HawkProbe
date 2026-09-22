@@ -87,6 +87,15 @@ type options struct {
 	NoProgress        bool
 	NoColor           bool
 	Quiet             bool
+	Retries           int
+	MaxRequests       int
+	Workspace         string
+	Suppressions      string
+	Bundle            string
+	HTML              bool
+	Markdown          bool
+	AI                bool
+	AIModel           string
 }
 
 type scanResult struct {

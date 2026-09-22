@@ -141,6 +141,8 @@ func parseFlags() (options, error) {
 	fs.IntVar(&opts.Concurrency, "c", 32, "concurrent requests per target")
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
 	fs.IntVar(&opts.Rate, "rate", 0, "maximum requests per second per target (0 = unlimited)")
+	fs.IntVar(&opts.Retries, "retries", 1, "retries per request on transient network/502/503/504 failures (0-5)")
+	fs.IntVar(&opts.MaxRequests, "max-requests", 0, "maximum requests per target (0 = unlimited)")
 	fs.DurationVar(&opts.Timeout, "timeout", 6*time.Second, "request timeout")
 	fs.BoolVar(&opts.Insecure, "k", false, "allow invalid TLS certificates")
 	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
@@ -167,6 +169,13 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.NoProgress, "no-progress", false, "disable terminal progress bar")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "disable ANSI colors")
 	fs.BoolVar(&opts.Quiet, "q", false, "only print findings and errors")
+	fs.StringVar(&opts.Workspace, "workspace", "", "workspace directory for scan history, reports and suppressions")
+	fs.StringVar(&opts.Suppressions, "suppressions", "", "suppression file (JSON)")
+	fs.StringVar(&opts.Bundle, "bundle", "", "write a report bundle (HTML, Markdown, JSON, CSV, SARIF) to a directory")
+	fs.BoolVar(&opts.HTML, "html", false, "HTML report output")
+	fs.BoolVar(&opts.Markdown, "markdown", false, "Markdown report output")
+	fs.BoolVar(&opts.AI, "ai", false, "generate per-target AI summaries via Ollama (optional)")
+	fs.StringVar(&opts.AIModel, "ai-model", "", "Ollama model for AI summaries (default from config or llama3.2)")
 
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
@@ -218,6 +227,12 @@ func parseFlags() (options, error) {
 	if opts.Rate < 0 || opts.Rate > 10000 {
 		return opts, errors.New("rate must be between 0 and 10000 requests/second")
 	}
+	if opts.Retries < 0 || opts.Retries > 5 {
+		return opts, errors.New("retries must be between 0 and 5")
+	}
+	if opts.MaxRequests < 0 || opts.MaxRequests > 100000 {
+		return opts, errors.New("max-requests must be between 0 and 100000")
+	}
 	if opts.Timeout < 500*time.Millisecond {
 		return opts, errors.New("timeout must be at least 500ms")
 	}
@@ -226,13 +241,16 @@ func parseFlags() (options, error) {
 	}
 
 	formats := 0
-	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF} {
+	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF, opts.HTML, opts.Markdown} {
 		if enabled {
 			formats++
 		}
 	}
 	if formats > 1 {
-		return opts, errors.New("use only one of -json, -jsonl, -csv, or -sarif")
+		return opts, errors.New("use only one of -json, -jsonl, -csv, -sarif, -html, or -markdown")
+	}
+	if formats > 0 && opts.Bundle != "" {
+		return opts, errors.New("-bundle already writes all formats; remove the explicit format flag")
 	}
 	if !validSeverityName(opts.MinSeverity) {
 		return opts, fmt.Errorf("invalid severity %q", opts.MinSeverity)
@@ -259,10 +277,11 @@ func reorderArgs(args []string) []string {
 	valueFlags := map[string]bool{
 		"-list": true, "-nmap": true, "-rules": true, "-mode": true, "-profile": true,
 		"-category": true, "-tag": true, "-severity": true, "-fail-on": true,
-		"-c": true, "-target-c": true, "-rate": true, "-timeout": true,
+		"-c": true, "-target-c": true, "-rate": true, "-retries": true, "-max-requests": true, "-timeout": true,
 		"-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true,
 		"-token": true, "-proxy": true, "-max-redirects": true, "-ua": true,
 		"-host": true, "-wordlist": true, "-seclists": true, "-ext": true,
+		"-workspace": true, "-suppressions": true, "-bundle": true, "-ai-model": true,
 	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
@@ -326,6 +345,11 @@ usage:
   hawkprobe rules stats
   hawkprobe rules validate custom-rules.json
   hawkprobe wordlists
+  hawkprobe config path|show|set|rm
+  hawkprobe workspace init|scans|show|prune
+  hawkprobe diff [dir] <base-scan> <new-scan>
+  hawkprobe resume [dir] <scan-id>
+  hawkprobe suppress list|add|remove
   hawkprobe doctor
   hawkprobe completion bash|zsh|fish
   hawkprobe version
@@ -364,6 +388,8 @@ scan options:
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
   -rate int             requests/sec per target; 0 = unlimited
+  -retries int          retries per request on transient failures (default 1, 0-5)
+  -max-requests int     stop a target after N requests; 0 = unlimited (default 0)
   -timeout duration     request timeout (default 6s)
   -discover             parse robots/sitemap and probe discovered paths
   -v                    show every rule check
@@ -388,6 +414,9 @@ terminal/output:
   -jsonl                JSON Lines output
   -csv                  CSV findings output
   -sarif                SARIF 2.1.0 output
+  -html                 single-file HTML report
+  -markdown             Markdown report
+  -bundle dir           write HTML + Markdown + JSON + CSV + SARIF bundle
   -o file               write output to a file
 
 examples:
@@ -404,6 +433,7 @@ examples:
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
   hawkprobe https://app.lab -mode full -urls-out discovered.txt
   nuclei -l discovered.txt
+  hawkprobe https://app.lab -mode full -bundle reports/app
   hawkprobe completion zsh
   hawkprobe rules validate custom-rules.json`)
 }
