@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 (2026-09-22)
+
+- Added HTML and Markdown report output with `-html` / `-md`, plus `-bundle dir` which writes report.html, report.md, findings.csv, hawkprobe.sarif, results.json, and results.jsonl in one call
+- Added named scan profiles with `-profile` and `hawkprobe config show|set|rm`; profiles live in `~/.config/hawkprobe/config.json` and can pin mode, categories, rate, concurrency, severity, fail-on, wordlists, suppressions, custom rules, and AI settings
+- Added retry support for transient failures with `-retries` (HTTP 502/503/504, connection resets, timeouts) and a per-target request budget with `-max-requests`
+- Added scan workspaces: `-workspace dir` records every scan with full results for later review, `hawkprobe resume <id>` picks up incomplete scans where they left off, and `hawkprobe diff <id-a> <id-b>` reports new/resolved/regressed findings between any two recorded scans
+- Added finding suppressions with `hawkprobe suppress list|add|remove`; suppressions can be scoped by rule, target, and/or URL path and can expire after a duration such as `30d` or `12h`; suppressed findings are excluded from output, summaries, fail-on, and workspace records
+- Added optional Ollama AI summaries with `-ai` (model selection via `-ai-model`, host via `OLLAMA_HOST` or the `ai` config block); summaries appear in terminal, JSON, HTML, and Markdown output and never fail the scan if Ollama is unavailable
+- Added a custom rule DSL with `-custom-rules file.json` (also `HAWKPROBE_CUSTOM_RULES` or a profile `custom-rules` key): per-rule name/path/method/severity/category/message and expect conditions (status, status_any, contains, contains_any, not_contains, header) with trailing-glob path support; validate files with `hawkprobe rules check <file>`
+- Raised the built-in catalog to 899 rules
+- Expanded the README with workflow documentation for profiles, reports, workspaces, suppressions, AI summaries, and the custom rule DSL
+- Added custom-rules.dsl.example.json alongside the existing legacy-format example
+
 ## 1.3.0 (development)
 
 - Added automatic Nmap XML, grepable (`-oG`), and normal saved-text target import through `-list`

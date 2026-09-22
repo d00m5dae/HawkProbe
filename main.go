@@ -22,6 +22,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if opts.Profile != "" {
+		if err := applyProfile(&opts, cfg, opts.explicitFlags); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	opts.Mode = lower(opts.Mode)
+	if !validModesSet()[opts.Mode] {
+		fmt.Fprintf(os.Stderr, "unknown mode %q\n", opts.Mode)
+		os.Exit(2)
+	}
 
 	rules, err := loadRules(opts.RuleFile, opts.Mode)
 	if err != nil {
@@ -44,7 +60,21 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	results := scanTargets(opts, targets, rules)
+	if opts.Workspace != "" {
+		workspaceOverride = opts.Workspace
+	}
+	sup, err := loadSuppressions(opts.Suppressions)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	scanStarted := time.Now()
+	results := scanTargets(opts, targets, rules, loadCustomRuleList(opts))
+	if len(sup.Suppressions) > 0 {
+		applySuppressions(results, sup)
+	}
+	attachAISummaries(results, opts, cfg)
+	recordWorkspaceScan(targets, results, opts, len(rules), scanStarted)
 	shouldFail := resultsMeetFailThreshold(results, opts.FailOn)
 	results = filterResultSeverity(results, opts.MinSeverity)
 	if err := outputResults(results, opts); err != nil {
@@ -92,6 +122,21 @@ func handleCommand(args []string) bool {
 			fmt.Printf("  @%-13s %s\n", name, secListsPresets[name])
 		}
 		return true
+	case "config":
+		handleConfigCommand(args)
+		return true
+	case "suppress":
+		handleSuppressCommand(args)
+		return true
+	case "workspace":
+		handleWorkspaceCommand(args)
+		return true
+	case "diff":
+		handleDiffCommand(args[1:])
+		return true
+	case "resume":
+		handleResumeCommand(args[1:])
+		return true
 	case "rules":
 		if len(args) >= 2 && args[1] == "stats" {
 			printRuleStats()
@@ -103,6 +148,15 @@ func handleCommand(args []string) bool {
 				os.Exit(2)
 			}
 			fmt.Println("rules valid")
+			return true
+		}
+		if len(args) >= 3 && args[1] == "check" {
+			cf, err := loadCustomRules(args[2])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "invalid:", err)
+				os.Exit(2)
+			}
+			fmt.Printf("%d custom rule(s) valid\n", len(cf.Rules))
 			return true
 		}
 		if len(args) >= 2 && args[1] == "list" {
@@ -132,8 +186,9 @@ func parseFlags() (options, error) {
 	fs.StringVar(&nmapAlias, "nmap", "", "alias for -list with Nmap output")
 	fs.BoolVar(&stdinAlias, "stdin", false, "alias for -list -")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
+	fs.StringVar(&opts.CustomRules, "custom-rules", "", "custom rule DSL file (JSON)")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
-	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
+	fs.StringVar(&profileAlias, "profile", "", "scan profile from config file, or a built-in mode name")
 	fs.StringVar(&opts.CategoryFilter, "category", "", "only scan comma-separated rule categories")
 	fs.StringVar(&opts.TagFilter, "tag", "", "only scan rules matching comma-separated tags")
 	fs.StringVar(&opts.MinSeverity, "severity", "", "only output findings at or above info/low/medium/high/critical")
@@ -141,6 +196,8 @@ func parseFlags() (options, error) {
 	fs.IntVar(&opts.Concurrency, "c", 32, "concurrent requests per target")
 	fs.IntVar(&opts.TargetConcurrency, "target-c", 4, "targets scanned concurrently")
 	fs.IntVar(&opts.Rate, "rate", 0, "maximum requests per second per target (0 = unlimited)")
+	fs.IntVar(&opts.Retries, "retries", 1, "retries per request on transient network/502/503/504 failures (0-5)")
+	fs.IntVar(&opts.MaxRequests, "max-requests", 0, "maximum requests per target (0 = unlimited)")
 	fs.DurationVar(&opts.Timeout, "timeout", 6*time.Second, "request timeout")
 	fs.BoolVar(&opts.Insecure, "k", false, "allow invalid TLS certificates")
 	fs.BoolVar(&opts.JSON, "json", false, "JSON output")
@@ -167,12 +224,22 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&opts.NoProgress, "no-progress", false, "disable terminal progress bar")
 	fs.BoolVar(&opts.NoColor, "no-color", false, "disable ANSI colors")
 	fs.BoolVar(&opts.Quiet, "q", false, "only print findings and errors")
+	fs.StringVar(&opts.Workspace, "workspace", "", "workspace directory for scan history, reports and suppressions")
+	fs.StringVar(&opts.Suppressions, "suppressions", "", "suppression file (JSON)")
+	fs.StringVar(&opts.Bundle, "bundle", "", "write a report bundle (HTML, Markdown, JSON, CSV, SARIF) to a directory")
+	fs.BoolVar(&opts.HTML, "html", false, "HTML report output")
+	fs.BoolVar(&opts.Markdown, "markdown", false, "Markdown report output")
+	fs.BoolVar(&opts.Markdown, "md", false, "alias for -markdown")
+	fs.BoolVar(&opts.AI, "ai", false, "generate per-target AI summaries via Ollama (optional)")
+	fs.StringVar(&opts.AIModel, "ai-model", "", "Ollama model for AI summaries (default from config or llama3.2)")
 
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
+	opts.explicitFlags = map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { opts.explicitFlags[f.Name] = true })
 	if profileAlias != "" {
-		opts.Mode = profileAlias
+		opts.Profile = profileAlias
 	}
 	if nmapAlias != "" {
 		if opts.ListFile != "" {
@@ -218,6 +285,12 @@ func parseFlags() (options, error) {
 	if opts.Rate < 0 || opts.Rate > 10000 {
 		return opts, errors.New("rate must be between 0 and 10000 requests/second")
 	}
+	if opts.Retries < 0 || opts.Retries > 5 {
+		return opts, errors.New("retries must be between 0 and 5")
+	}
+	if opts.MaxRequests < 0 || opts.MaxRequests > 100000 {
+		return opts, errors.New("max-requests must be between 0 and 100000")
+	}
 	if opts.Timeout < 500*time.Millisecond {
 		return opts, errors.New("timeout must be at least 500ms")
 	}
@@ -226,13 +299,16 @@ func parseFlags() (options, error) {
 	}
 
 	formats := 0
-	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF} {
+	for _, enabled := range []bool{opts.JSON, opts.JSONL, opts.CSV, opts.SARIF, opts.HTML, opts.Markdown} {
 		if enabled {
 			formats++
 		}
 	}
 	if formats > 1 {
-		return opts, errors.New("use only one of -json, -jsonl, -csv, or -sarif")
+		return opts, errors.New("use only one of -json, -jsonl, -csv, -sarif, -html, or -markdown/-md")
+	}
+	if formats > 0 && opts.Bundle != "" {
+		return opts, errors.New("-bundle already writes all formats; remove the explicit format flag")
 	}
 	if !validSeverityName(opts.MinSeverity) {
 		return opts, fmt.Errorf("invalid severity %q", opts.MinSeverity)
@@ -242,9 +318,11 @@ func parseFlags() (options, error) {
 	}
 
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
-	opts.Mode = lower(opts.Mode)
-	if !validModes[opts.Mode] {
-		return opts, fmt.Errorf("unknown mode %q", opts.Mode)
+	if opts.Profile == "" {
+		opts.Mode = lower(opts.Mode)
+		if !validModes[opts.Mode] {
+			return opts, fmt.Errorf("unknown mode %q", opts.Mode)
+		}
 	}
 	if (opts.User == "") != (opts.Pass == "") {
 		return opts, errors.New("basic auth requires both -user and -pass")
@@ -259,10 +337,12 @@ func reorderArgs(args []string) []string {
 	valueFlags := map[string]bool{
 		"-list": true, "-nmap": true, "-rules": true, "-mode": true, "-profile": true,
 		"-category": true, "-tag": true, "-severity": true, "-fail-on": true,
-		"-c": true, "-target-c": true, "-rate": true, "-timeout": true,
+		"-c": true, "-target-c": true, "-rate": true, "-retries": true, "-max-requests": true, "-timeout": true,
 		"-o": true, "-urls-out": true, "-H": true, "-user": true, "-pass": true,
 		"-token": true, "-proxy": true, "-max-redirects": true, "-ua": true,
 		"-host": true, "-wordlist": true, "-seclists": true, "-ext": true,
+		"-workspace": true, "-suppressions": true, "-bundle": true, "-ai-model": true,
+		"-custom-rules": true,
 	}
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
@@ -284,7 +364,7 @@ func reorderArgs(args []string) []string {
 	return append(flags, positional...)
 }
 
-func scanTargets(opts options, targets []string, rules []rule) []scanResult {
+func scanTargets(opts options, targets []string, rules []rule, custom []customRule) []scanResult {
 	results := make([]scanResult, len(targets))
 	workers := minInt(opts.TargetConcurrency, len(targets))
 	if workers < 1 {
@@ -301,7 +381,7 @@ func scanTargets(opts options, targets []string, rules []rule) []scanResult {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				results[j.index] = scanTarget(opts, j.target, rules)
+				results[j.index] = scanTarget(opts, j.target, rules, custom)
 			}
 		}()
 	}
@@ -326,6 +406,11 @@ usage:
   hawkprobe rules stats
   hawkprobe rules validate custom-rules.json
   hawkprobe wordlists
+  hawkprobe config path|show|set|rm
+  hawkprobe workspace init|scans|show|prune
+  hawkprobe diff [dir] <base-scan> <new-scan>
+  hawkprobe resume [dir] <scan-id>
+  hawkprobe suppress list|add|remove
   hawkprobe doctor
   hawkprobe completion bash|zsh|fish
   hawkprobe version
@@ -355,6 +440,7 @@ input:
 
 scan selection:
   -mode string          scan mode (default "default")
+  -profile string       scan profile from config file, or a built-in mode name
   -category list        only categories, e.g. cloud,devops,backup
   -tag list             only tags, e.g. htb,exposure
   -severity level       only output findings at/above a severity
@@ -364,6 +450,8 @@ scan options:
   -c int                concurrent requests per target (default 32)
   -target-c int         targets scanned concurrently (default 4)
   -rate int             requests/sec per target; 0 = unlimited
+  -retries int          retries per request on transient failures (default 1, 0-5)
+  -max-requests int     stop a target after N requests; 0 = unlimited (default 0)
   -timeout duration     request timeout (default 6s)
   -discover             parse robots/sitemap and probe discovered paths
   -v                    show every rule check
@@ -388,6 +476,9 @@ terminal/output:
   -jsonl                JSON Lines output
   -csv                  CSV findings output
   -sarif                SARIF 2.1.0 output
+  -html                 single-file HTML report
+  -markdown, -md        Markdown report
+  -bundle dir           write HTML + Markdown + JSON + CSV + SARIF bundle
   -o file               write output to a file
 
 examples:
@@ -404,6 +495,7 @@ examples:
   hawkprobe -host internal.htb http://10.10.10.10 -mode htb
   hawkprobe https://app.lab -mode full -urls-out discovered.txt
   nuclei -l discovered.txt
+  hawkprobe https://app.lab -mode full -bundle reports/app
   hawkprobe completion zsh
   hawkprobe rules validate custom-rules.json`)
 }

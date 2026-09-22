@@ -14,15 +14,16 @@ It is built for the part of a pentest where you already have HTTP services and w
 
 ## Why HawkProbe
 
-- **450+ built-in checks** across exposure, backup, cloud, DevOps, admin, API, debug, CMS/framework, source/build, and metadata classes.
+- **899 built-in checks** across exposure, backup, cloud, DevOps, admin, API, debug, CMS/framework, source/build, and metadata classes.
 - **Fast by default** — concurrent Go HTTP engine, connection reuse, HTTP/2, multi-target workers, and optional request pacing.
 - **Useful on HTB/CTFs** — `htb` mode, Host-header overrides, exposed-file checks, framework/debug discovery, and optional SecLists enumeration.
 - **Pipeline friendly** — plain files, stdin, Nmap XML, Nmap grepable/normal output, and httpx JSONL can all become scan targets.
 - **No runtime stack** — one Go binary; no Python, Perl, Node, Docker, or template engine required.
 - **Low-noise design** — randomized missing-path baselines help reject wildcard routes and soft 404s.
-- **Readable findings** — severity, category, confidence, evidence, remediation, URL, and structured JSON/JSONL/CSV/SARIF output.
-- **CI friendly** — fail builds on a configurable severity threshold with `-fail-on`.
-- **Extensible** — custom JSON rules, category/tag filtering, and a built-in rule database organized around real exposure classes.
+- **Readable findings** — severity, category, confidence, evidence, remediation, URL, and structured JSON/JSONL/CSV/SARIF/HTML/Markdown output.
+- **CI friendly** — fail builds on a configurable severity threshold with `-fail-on`; retry transient errors with `-retries` and cap work with `-max-requests`.
+- **Trackable over time** — workspaces record scans, `resume` finishes interrupted runs, and `diff` shows what changed between scans.
+- **Extensible** — a custom rule DSL for project-specific checks, reusable named profiles, finding suppressions for known issues, and an optional local Ollama AI summary per target.
 
 ## Install
 
@@ -93,6 +94,28 @@ A live terminal gets an adaptive progress bar automatically. Progress disables i
 | `headers` | Security headers, cookies, CORS, HTTP methods |
 | `tls` | Certificate/TLS checks |
 | `tech` | Technology fingerprinting |
+
+## Profiles
+
+Repeated flag combinations can be saved as named profiles in the local config file (`~/.config/hawkprobe/config.json`):
+
+```bash
+hawkprobe config set staging '{"mode":"exposure","rate":50,"severity":"medium","fail-on":"high"}'
+hawkprobe config set htb-box '{"mode":"htb","wordlist":"@common","rate":200}'
+
+hawkprobe https://staging.example -profile staging
+hawkprobe http://box.htb -profile htb-box
+```
+
+Explicit CLI flags always win over profile values. Inspect or remove profiles with:
+
+```bash
+hawkprobe config show
+hawkprobe config rm staging
+hawkprobe config path
+```
+
+Profiles can pin mode, category, tag, severity, fail-on, concurrency, rate, retries, max-requests, timeout, wordlist, extensions, discover, insecure, suppressions, custom rules, and AI settings.
 
 You can narrow a broad mode without inventing another profile:
 
@@ -257,6 +280,22 @@ For lists of targets:
 hawkprobe -list targets.txt -target-c 8 -c 48
 ```
 
+## Retries and request budgets
+
+Flaky lab gear, rate-limited WAFs, or overloaded services can drop individual requests. Retry transient failures (502/503/504, connection resets, timeouts) with a short backoff:
+
+```bash
+hawkprobe https://example.com -retries 2
+```
+
+Cap the total number of requests per target when the surface is large or the service is fragile:
+
+```bash
+hawkprobe https://example.com -mode full -max-requests 2000
+```
+
+Both options compose with `-rate` and apply per target.
+
 ## HTB / virtual hosts
 
 Override the HTTP Host header without changing the connection address:
@@ -357,6 +396,73 @@ hawkprobe https://staging.example -mode exposure -fail-on high
 
 Structured findings include fields such as rule ID, category, severity, confidence, URL, evidence, and remediation when available.
 
+## Reports
+
+Share results as a self-contained HTML page or a Markdown document:
+
+```bash
+hawkprobe https://example.com -mode full -html -o report.html
+hawkprobe -list targets.txt -md -o report.md
+```
+
+Or write every format at once:
+
+```bash
+hawkprobe https://example.com -bundle ./report-bundle
+```
+
+`-bundle` produces `report.html`, `report.md`, `findings.csv`, `hawkprobe.sarif`, `results.json`, and `results.jsonl` in the given directory.
+
+## Workspaces, diff, and resume
+
+Record scans into a workspace directory to build a local history you can query later:
+
+```bash
+hawkprobe -list targets.txt -workspace ./hawk-work
+```
+
+Every run stores its options, per-target results, and a summary in the workspace. Inspect recorded scans and compare any two of them:
+
+```bash
+hawkprobe workspace list
+hawkprobe diff <scan-id-a> <scan-id-b>
+```
+
+`diff` reports new findings, resolved findings, and severity regressions by rule — useful to show what a patch actually changed.
+
+If a scan was interrupted (Ctrl-C, timeout, lost connectivity), pick it up where it stopped:
+
+```bash
+hawkprobe workspace list        # find the incomplete scan id
+hawkprobe resume <scan-id>
+```
+
+Resume reuses the recorded options and only scans the targets that were not completed.
+
+## Suppressions
+
+Known-and-accepted findings can be suppressed so they stop cluttering reports and CI without re-editing your rule set:
+
+```bash
+hawkprobe suppress add --rule env --reason "staging exposure, accepted" --expires 30d
+hawkprobe suppress add --rule csp-missing --target https://old.example --expires 12h
+hawkprobe suppress list
+hawkprobe suppress remove 0
+```
+
+Suppressions are scoped by rule, target, and/or URL path, and expire automatically. They are read from `-suppressions file.json` (or the default config location), apply before output and fail-on evaluation, and show up as a per-target suppressed count.
+
+## AI summaries (Ollama)
+
+With a local [Ollama](https://ollama.com) instance, add a short report-style summary for every target:
+
+```bash
+hawkprobe https://example.com -mode full -ai
+hawkprobe https://example.com -ai -ai-model qwen2.5:7b
+```
+
+The host defaults to `http://127.0.0.1:11434` (override with `OLLAMA_HOST` or the `ai` block in the config file); the model defaults to `llama3.2`. Summaries appear in terminal, JSON, HTML, and Markdown output. If Ollama is unreachable, HawkProbe prints a note and completes the scan normally.
+
 ## Shell completion
 
 HawkProbe can generate completion scripts without installing an extra package:
@@ -371,7 +477,7 @@ You can redirect the output into the completion directory used by your shell or 
 
 ## Built-in coverage
 
-The catalog includes 450+ checks across areas such as:
+The catalog includes 899 built-in checks across areas such as:
 
 - Git, SVN, Mercurial, Bazaar, CVS, and other repository metadata
 - environment/configuration files
@@ -422,6 +528,47 @@ hawkprobe https://example.com -rules custom-rules.json
 ```
 
 Supported rule capabilities include status matching/exclusion, GET/HEAD/OPTIONS, body contains/not-contains, regex, response headers, content type, category, confidence, tags, evidence, and remediation.
+
+### Rule DSL with expect blocks
+
+For project-specific checks, the DSL format pairs a path with an `expect` block — all conditions must match for the rule to fire:
+
+```json
+{
+  "rules": [
+    {
+      "name": "admin-panel",
+      "path": "/admin*",
+      "severity": "medium",
+      "message": "Admin panel exposed",
+      "expect": { "status": 200, "contains": "login" }
+    },
+    {
+      "name": "internal-health",
+      "path": "/internal/health",
+      "severity": "low",
+      "category": "debug",
+      "expect": {
+        "status_any": [200, 204],
+        "contains_any": ["healthy", "ok"],
+        "not_contains": ["not found"],
+        "header": { "Content-Type": "json" }
+      }
+    }
+  ]
+}
+```
+
+See [custom-rules.dsl.example.json](custom-rules.dsl.example.json) for a complete sample. Expect fields: `status` (exact code), `status_any` (any of), `contains` (all must appear), `contains_any` (at least one), `not_contains` (none may appear), and `header` (header value must contain the string). `contains`-family fields accept a single string or an array. `path` may be a relative path, an absolute URL, or a trailing glob — `/admin*` fetches both `/admin` and `/admin/`. Optional fields: `method`, `category`, `message`, `remediation`.
+
+Validate and run:
+
+```bash
+hawkprobe rules check custom-rules.dsl.json
+hawkprobe https://example.com -custom-rules custom-rules.dsl.json
+```
+
+The file also comes from the `HAWKPROBE_CUSTOM_RULES` environment variable or a `custom-rules` key in a profile. Findings from DSL rules are reported under the `custom` category with rule id `custom:<name>`.
 
 ## Development
 

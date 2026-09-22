@@ -25,3 +25,53 @@ jobs:
       - run: go vet ./...
       - if: matrix.go == 'stable'
         run: go test -race ./...
+      - name: CLI smoke test
+        if: matrix.go == 'stable'
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          export HAWKPROBE_WORKSPACE="$RUNNER_TEMP/ws"
+          export HAWKPROBE_SUPPRESSIONS="$RUNNER_TEMP/suppressions.json"
+          mkdir -p "$HOME"
+          go build -o "$RUNNER_TEMP/hawkprobe" .
+          HP="$RUNNER_TEMP/hawkprobe"
+
+          # rule catalog and rule files
+          "$HP" rules stats | head -1
+          "$HP" rules validate custom-rules.example.json
+          "$HP" rules check custom-rules.dsl.example.json
+
+          # config profiles
+          "$HP" config set ci '{"mode":"quick","rate":500}'
+          "$HP" config show
+          "$HP" config rm ci
+
+          # suppressions
+          "$HP" suppress list
+          "$HP" suppress add --rule env --reason "ci smoke" --expires 24h
+          "$HP" suppress list
+          "$HP" suppress remove 0
+
+          # workspace + live scan against a local server
+          mkdir -p site
+          printf 'SECRET=1\n' > site/.env
+          python3 -m http.server 8123 -d site >/dev/null 2>&1 & echo $! > "$RUNNER_TEMP/srv.pid"
+          sleep 1
+          "$HP" http://127.0.0.1:8123/ -mode quick -json -o "$RUNNER_TEMP/results.json"
+          "$HP" http://127.0.0.1:8123/ -mode headers -html -o "$RUNNER_TEMP/report.html"
+          "$HP" http://127.0.0.1:8123/ -mode headers -md -o "$RUNNER_TEMP/report.md"
+          "$HP" http://127.0.0.1:8123/ -mode headers -retries 1 -max-requests 200
+          if "$HP" http://127.0.0.1:8123/ -profile nonexistent -mode headers >/dev/null 2>&1; then
+            echo "expected unknown profile to fail"
+            exit 1
+          fi
+          kill "$(cat "$RUNNER_TEMP/srv.pid")"
+
+          # recorded history, resume, and diff
+          "$HP" workspace list
+          ID="$("$HP" workspace scans | sed -n 2p | awk '{print $1}')"
+          "$HP" resume "$ID"
+          "$HP" diff "$ID" "$ID"
+          test -s "$RUNNER_TEMP/results.json"
+          test -s "$RUNNER_TEMP/report.html"
+          test -s "$RUNNER_TEMP/report.md"

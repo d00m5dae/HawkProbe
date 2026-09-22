@@ -126,7 +126,7 @@ func TestScanTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := scanTarget(opts, srv.URL, rules)
+	result := scanTarget(opts, srv.URL, rules, nil)
 	if result.Error != "" {
 		t.Fatal(result.Error)
 	}

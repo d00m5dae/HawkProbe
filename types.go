@@ -54,6 +54,7 @@ type options struct {
 	Target            string
 	ListFile          string
 	RuleFile          string
+	CustomRules       string
 	Mode              string
 	CategoryFilter    string
 	TagFilter         string
@@ -84,9 +85,21 @@ type options struct {
 	Discover          bool
 	Wordlist          string
 	Extensions        string
+	Profile           string
 	NoProgress        bool
 	NoColor           bool
 	Quiet             bool
+	Retries           int
+	MaxRequests       int
+	Workspace         string
+	Suppressions      string
+	Bundle            string
+	HTML              bool
+	Markdown          bool
+	AI                bool
+	AIModel           string
+
+	explicitFlags map[string]bool
 }
 
 type scanResult struct {
@@ -97,8 +110,10 @@ type scanResult struct {
 	RulesChecked int       `json:"rules_checked,omitempty"`
 	NoMatch      int       `json:"no_match,omitempty"`
 	Skipped      int       `json:"skipped,omitempty"`
+	Suppressed   int       `json:"suppressed,omitempty"`
 	Findings     []finding `json:"findings"`
 	Error        string    `json:"error,omitempty"`
+	AISummary    string    `json:"ai_summary,omitempty"`
 }
 
 type ruleStats struct {
