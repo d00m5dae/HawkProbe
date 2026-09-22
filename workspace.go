@@ -364,6 +364,9 @@ func handleWorkspaceCommand(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: hawkprobe workspace init|scans|show|prune")
 		os.Exit(2)
 	}
+	if args[1] == "list" {
+		args[1] = "scans"
+	}
 	switch args[1] {
 	case "init":
 		dir := workspaceDir()

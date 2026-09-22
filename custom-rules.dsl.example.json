@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "name": "admin-panel",
+      "path": "/admin*",
+      "severity": "medium",
+      "message": "Admin panel exposed",
+      "remediation": "Restrict the admin interface to authenticated or trusted networks.",
+      "expect": {
+        "status": 200,
+        "contains": "login"
+      }
+    },
+    {
+      "name": "internal-health",
+      "path": "/internal/health",
+      "method": "GET",
+      "severity": "low",
+      "category": "debug",
+      "remediation": "Restrict internal health endpoints to trusted networks.",
+      "expect": {
+        "status_any": [200, 204],
+        "contains_any": ["healthy", "ok"],
+        "header": { "Content-Type": "json" }
+      }
+    },
+    {
+      "name": "backup-archive",
+      "path": "https://app.example/backup*",
+      "severity": "high",
+      "category": "backup",
+      "remediation": "Remove or restrict access to backup archives.",
+      "expect": {
+        "status": 200,
+        "not_contains": "404"
+      }
+    }
+  ]
+}
