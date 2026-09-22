@@ -73,6 +73,7 @@ func main() {
 	if len(sup.Suppressions) > 0 {
 		applySuppressions(results, sup)
 	}
+	attachAISummaries(results, opts, cfg)
 	recordWorkspaceScan(targets, results, opts, len(rules), scanStarted)
 	shouldFail := resultsMeetFailThreshold(results, opts.FailOn)
 	results = filterResultSeverity(results, opts.MinSeverity)
