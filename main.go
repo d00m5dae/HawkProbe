@@ -60,7 +60,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	if opts.Workspace != "" {
+		workspaceOverride = opts.Workspace
+	}
+	scanStarted := time.Now()
 	results := scanTargets(opts, targets, rules)
+	recordWorkspaceScan(targets, results, opts, len(rules), scanStarted)
 	shouldFail := resultsMeetFailThreshold(results, opts.FailOn)
 	results = filterResultSeverity(results, opts.MinSeverity)
 	if err := outputResults(results, opts); err != nil {
@@ -110,6 +115,15 @@ func handleCommand(args []string) bool {
 		return true
 	case "config":
 		handleConfigCommand(args)
+		return true
+	case "workspace":
+		handleWorkspaceCommand(args)
+		return true
+	case "diff":
+		handleDiffCommand(args[1:])
+		return true
+	case "resume":
+		handleResumeCommand(args[1:])
 		return true
 	case "rules":
 		if len(args) >= 2 && args[1] == "stats" {
