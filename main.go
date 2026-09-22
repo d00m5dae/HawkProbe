@@ -22,6 +22,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if opts.Profile != "" {
+		if err := applyProfile(&opts, cfg, opts.explicitFlags); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	opts.Mode = lower(opts.Mode)
+	if !validModesSet()[opts.Mode] {
+		fmt.Fprintf(os.Stderr, "unknown mode %q\n", opts.Mode)
+		os.Exit(2)
+	}
 
 	rules, err := loadRules(opts.RuleFile, opts.Mode)
 	if err != nil {
@@ -92,6 +108,9 @@ func handleCommand(args []string) bool {
 			fmt.Printf("  @%-13s %s\n", name, secListsPresets[name])
 		}
 		return true
+	case "config":
+		handleConfigCommand(args)
+		return true
 	case "rules":
 		if len(args) >= 2 && args[1] == "stats" {
 			printRuleStats()
@@ -133,7 +152,7 @@ func parseFlags() (options, error) {
 	fs.BoolVar(&stdinAlias, "stdin", false, "alias for -list -")
 	fs.StringVar(&opts.RuleFile, "rules", "", "custom JSON rule file")
 	fs.StringVar(&opts.Mode, "mode", "default", "scan mode")
-	fs.StringVar(&profileAlias, "profile", "", "deprecated alias for -mode")
+	fs.StringVar(&profileAlias, "profile", "", "scan profile from config file, or a built-in mode name")
 	fs.StringVar(&opts.CategoryFilter, "category", "", "only scan comma-separated rule categories")
 	fs.StringVar(&opts.TagFilter, "tag", "", "only scan rules matching comma-separated tags")
 	fs.StringVar(&opts.MinSeverity, "severity", "", "only output findings at or above info/low/medium/high/critical")
@@ -180,8 +199,10 @@ func parseFlags() (options, error) {
 	if err := fs.Parse(reorderArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
+	opts.explicitFlags = map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { opts.explicitFlags[f.Name] = true })
 	if profileAlias != "" {
-		opts.Mode = profileAlias
+		opts.Profile = profileAlias
 	}
 	if nmapAlias != "" {
 		if opts.ListFile != "" {
@@ -260,9 +281,11 @@ func parseFlags() (options, error) {
 	}
 
 	validModes := map[string]bool{"quick": true, "default": true, "full": true, "deep": true, "htb": true, "exposure": true, "admin": true, "api": true, "debug": true, "headers": true, "tls": true, "tech": true}
-	opts.Mode = lower(opts.Mode)
-	if !validModes[opts.Mode] {
-		return opts, fmt.Errorf("unknown mode %q", opts.Mode)
+	if opts.Profile == "" {
+		opts.Mode = lower(opts.Mode)
+		if !validModes[opts.Mode] {
+			return opts, fmt.Errorf("unknown mode %q", opts.Mode)
+		}
 	}
 	if (opts.User == "") != (opts.Pass == "") {
 		return opts, errors.New("basic auth requires both -user and -pass")
@@ -379,6 +402,7 @@ input:
 
 scan selection:
   -mode string          scan mode (default "default")
+  -profile string       scan profile from config file, or a built-in mode name
   -category list        only categories, e.g. cloud,devops,backup
   -tag list             only tags, e.g. htb,exposure
   -severity level       only output findings at/above a severity

@@ -84,6 +84,7 @@ type options struct {
 	Discover          bool
 	Wordlist          string
 	Extensions        string
+	Profile           string
 	NoProgress        bool
 	NoColor           bool
 	Quiet             bool
@@ -96,6 +97,8 @@ type options struct {
 	Markdown          bool
 	AI                bool
 	AIModel           string
+
+	explicitFlags map[string]bool
 }
 
 type scanResult struct {
